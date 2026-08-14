@@ -23,9 +23,14 @@ let savedHome: string | undefined
 let harnessRoot: string
 
 /** 假子代理：在 staging 写入最小可构建插件，返回 completed + REPORT。 */
-function fakeChild(options: { staging: string; harnessRoot: string; variation?: number }): StartChild {
+function fakeChild(options: {
+  staging: string
+  harnessRoot: string
+  variation?: number
+  removeFromStaging?: readonly string[]
+}): StartChild {
   return async () => {
-    const { staging, harnessRoot: harness, variation = 1 } = options
+    const { staging, harnessRoot: harness, variation = 1, removeFromStaging = [] } = options
     await mkdir(path.join(staging, 'src'), { recursive: true })
     await writeFile(path.join(staging, 'package.json'), JSON.stringify({
       name: '@dsh-external/demo-mini',
@@ -74,6 +79,13 @@ function fakeChild(options: { staging: string; harnessRoot: string; variation?: 
       '',
     ].join('\n'))
     await writeFile(path.join(staging, 'README.md'), `# demo-mini\n\n最小示例插件（第 ${variation} 版）。\n`)
+    if (variation === 1) {
+      await writeFile(path.join(staging, 'legacy.txt'), 'will be removed on update\n')
+    }
+    // 更新模式下：模拟子代理按需求从交付目录删除文件（宿主应同步删除）。
+    for (const rel of removeFromStaging) {
+      await rm(path.join(staging, rel), { force: true })
+    }
     const text = [
       'REPORT_START',
       'plugin_name: demo-mini',
@@ -170,7 +182,7 @@ describe('runForge 端到端（假子代理 + 真实迁移/构建/git）', () =>
     expect(registry.repos[0]?.commitCount).toBe(1)
   }, 240_000)
 
-  it('update=true 时更新既有仓库并累计提交次数', async () => {
+  it('update=true 时更新既有仓库、同步删除过期文件并累计提交次数', async () => {
     const config = makeConfig()
     const name = 'demo-mini'
     const staging = path.join(config.stagingRoot, name)
@@ -184,17 +196,20 @@ describe('runForge 端到端（假子代理 + 真实迁移/构建/git）', () =>
       signal: new AbortController().signal,
       startChild: fakeChild({ staging, harnessRoot, variation: 1 }),
     })
+    // 第一次创建的仓库包含 legacy.txt。
+    await expect(stat(path.join(target, 'legacy.txt'))).resolves.toBeDefined()
 
-    // 第二次：更新既有仓库。
+    // 第二次：更新既有仓库；子代理删除了 legacy.txt → 宿主应同步删除。
     const result = await runForge({
       config,
       workspace: REPO_ROOT,
       harnessRoot,
       args: { requirement: '更新示例插件', name, migrate: true, update: true },
       signal: new AbortController().signal,
-      startChild: fakeChild({ staging, harnessRoot, variation: 2 }),
+      startChild: fakeChild({ staging, harnessRoot, variation: 2, removeFromStaging: ['legacy.txt'] }),
     })
     expect(result.committed).toBe(true)
+    await expect(stat(path.join(target, 'legacy.txt'))).rejects.toThrow()
 
     const registry = await loadRegistry()
     expect(registry.repos).toHaveLength(1)

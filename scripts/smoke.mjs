@@ -18,8 +18,10 @@ import {
   relativeLink,
   rewriteHarnessLinks,
   runCommand,
+  samePath,
   slugFromRequirement,
   stageAll,
+  syncRemoveStale,
 } from '../lib/index.js'
 
 let failed = 0
@@ -40,6 +42,11 @@ try {
 
   check('normalizePluginName', normalizePluginName('My Cool Plugin!', 'x') === 'my-cool-plugin')
   check('slugFromRequirement', slugFromRequirement('Create a plugin for web search memo') === 'web-search-memo')
+  check(
+    'slugFromRequirement 中文需求哈希后缀',
+    /^dsh-plugin-[0-9a-f]{8}$/.test(slugFromRequirement('做一个支持定时任务的插件')),
+  )
+  check('samePath 大小写不敏感', samePath('D:/2-OGP/demo', 'd:/2-ogp/DEMO') === (process.platform === 'win32'))
   check(
     'buildCommitSubject',
     buildCommitSubject('feat', 'web-search-memo', 'add keyword search for session memos')
@@ -87,6 +94,26 @@ try {
   await ensureGitignore(repo)
   const second = await readFile(path.join(repo, '.gitignore'), 'utf8')
   check('ensureGitignore 幂等', first === second)
+
+  // 同步删除：target 独有文件被删，node_modules 受保护。
+  const syncSrc = path.join(root, 'sync-src')
+  const syncTarget = path.join(root, 'sync-target')
+  await mkdir(syncSrc, { recursive: true })
+  await mkdir(path.join(syncTarget, 'node_modules'), { recursive: true })
+  await writeFile(path.join(syncSrc, 'keep.txt'), 'keep')
+  await writeFile(path.join(syncTarget, 'keep.txt'), 'old')
+  await writeFile(path.join(syncTarget, 'stale.txt'), 'stale')
+  await writeFile(path.join(syncTarget, 'node_modules', 'dep.js'), 'dep')
+  const removed = await syncRemoveStale(syncSrc, syncTarget)
+  check('syncRemoveStale 删除过期文件', removed === 1)
+  let staleGone = true
+  try {
+    await import('node:fs/promises').then(({ stat }) => stat(path.join(syncTarget, 'stale.txt')))
+    staleGone = false
+  } catch {
+    // 已删除。
+  }
+  check('syncRemoveStale 保护 node_modules', staleGone)
 
   // git 链路：init → add → commit → 无改动不再提交。
   await ensureGitRepo(repo)

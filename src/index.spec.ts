@@ -4,15 +4,22 @@
  * 覆盖纯逻辑（命名、slug、link 改写、.gitignore、登记表读写）
  * 与 git 集成链路（init → add → diff → commit，真实 git，临时目录）。
  */
-import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { ensureGitignore, rewriteHarnessLinks } from './migrate.ts'
+import { ensureGitignore, rewriteHarnessLinks, syncRemoveStale } from './migrate.ts'
 import { assertNoRegistryHarnessDeps } from './forge.ts'
 import { commitStaged, ensureGitRepo, stageAll } from './git.ts'
 import { loadRegistry, saveRegistry } from './registry.ts'
-import { buildCommitSubject, normalizePluginName, relativeLink, slugFromRequirement, toPosix } from './utils.ts'
+import {
+  buildCommitSubject,
+  normalizePluginName,
+  relativeLink,
+  samePath,
+  slugFromRequirement,
+  toPosix,
+} from './utils.ts'
 
 let tempRoot: string
 let savedHome: string | undefined
@@ -42,8 +49,21 @@ describe('slugFromRequirement', () => {
   it('从需求提取有意义的英文单词', () => {
     expect(slugFromRequirement('Create a plugin for web search memo')).toBe('web-search-memo')
   })
-  it('无有效英文单词时回退', () => {
-    expect(slugFromRequirement('做一个支持定时任务的插件')).toBe('dsh-plugin')
+  it('无有效英文单词时用需求哈希做稳定唯一后缀', () => {
+    const first = slugFromRequirement('做一个支持定时任务的插件')
+    const second = slugFromRequirement('做一个支持定时任务的插件')
+    const other = slugFromRequirement('做一个支持会话归档的插件')
+    expect(first).toMatch(/^dsh-plugin-[0-9a-f]{8}$/)
+    expect(second).toBe(first) // 同一需求 → 同一名字
+    expect(other).not.toBe(first) // 不同需求 → 不同名字
+  })
+})
+
+describe('samePath', () => {
+  it('Windows 下大小写不敏感，去尾斜杠', () => {
+    expect(samePath('D:/2-OGP/demo', 'D:/2-OGP/demo/')).toBe(true)
+    expect(samePath('D:/2-OGP/demo', 'd:/2-ogp/DEMO')).toBe(process.platform === 'win32')
+    expect(samePath('D:/2-OGP/demo', 'D:/2-OGP/other')).toBe(false)
   })
 })
 
@@ -185,6 +205,38 @@ describe('assertNoRegistryHarnessDeps', () => {
       dependencies: { '@deepseek-ai/cordis': 'link:../deepseek-harness/vendor/cordis' },
     }))
     await expect(assertNoRegistryHarnessDeps(pkgPath, path.join(tempRoot, 'deepseek-harness'))).resolves.toBeUndefined()
+  })
+})
+
+describe('syncRemoveStale（更新同步语义）', () => {
+  it('删除 target 中 source 已不存在的文件，保护 .git/node_modules/lib', async () => {
+    const source = path.join(tempRoot, 'src-repo')
+    const target = path.join(tempRoot, 'target-repo')
+    await mkdir(path.join(source, 'src'), { recursive: true })
+    await mkdir(path.join(target, 'src'), { recursive: true })
+    await mkdir(path.join(target, '.git'), { recursive: true })
+    await mkdir(path.join(target, 'node_modules'), { recursive: true })
+    await mkdir(path.join(target, 'lib'), { recursive: true })
+    // 双方都有：保留。
+    await writeFile(path.join(source, 'src', 'index.ts'), 'new')
+    await writeFile(path.join(target, 'src', 'index.ts'), 'old')
+    // target 独有：删除。
+    await writeFile(path.join(target, 'legacy.txt'), 'stale')
+    await writeFile(path.join(target, 'src', 'removed.ts'), 'stale')
+    // 受保护：保留。
+    await writeFile(path.join(target, '.git', 'config'), 'git')
+    await writeFile(path.join(target, 'node_modules', 'dep.js'), 'dep')
+    await writeFile(path.join(target, 'lib', 'index.js'), 'built')
+
+    const removed = await syncRemoveStale(source, target)
+    expect(removed).toBe(2)
+    // 双方都有的文件：保留（内容覆盖是 copyInto 的职责，此处不动）。
+    await expect(readFile(path.join(target, 'src', 'index.ts'), 'utf8')).resolves.toBe('old')
+    await expect(stat(path.join(target, 'legacy.txt'))).rejects.toThrow()
+    await expect(stat(path.join(target, 'src', 'removed.ts'))).rejects.toThrow()
+    await expect(stat(path.join(target, '.git', 'config'))).resolves.toBeDefined()
+    await expect(stat(path.join(target, 'node_modules', 'dep.js'))).resolves.toBeDefined()
+    await expect(stat(path.join(target, 'lib', 'index.js'))).resolves.toBeDefined()
   })
 })
 
