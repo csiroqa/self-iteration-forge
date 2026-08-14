@@ -102,6 +102,16 @@ export function normalizePluginName(input: string | undefined, fallback: string)
   return cleaned.length > 0 ? cleaned : fallback
 }
 
+/** FNV-1a 32 位哈希（稳定、无依赖，用于生成确定性短后缀）。 */
+export function fnv1a(text: string): number {
+  let hash = 0x811c9dc5
+  for (let index = 0; index < text.length; index += 1) {
+    hash ^= text.charCodeAt(index)
+    hash = Math.imul(hash, 0x01000193)
+  }
+  return hash >>> 0
+}
+
 /** 从需求文本生成缺省插件名（取前几个有意义的英文单词）。 */
 export function slugFromRequirement(requirement: string): string {
   const words = requirement.toLowerCase().match(/[a-z][a-z0-9]*/g) ?? []
@@ -116,7 +126,25 @@ export function slugFromRequirement(requirement: string): string {
     picked.push(word)
     if (picked.length >= 3) break
   }
-  return picked.length > 0 ? picked.join('-') : 'dsh-plugin'
+  if (picked.length > 0) return picked.join('-')
+  // 无有效英文词（如纯中文需求）时：用需求哈希做稳定后缀，
+  // 避免多个中文需求全部落到同一个缺省名。
+  return `dsh-plugin-${fnv1a(requirement).toString(16).padStart(8, '0')}`
+}
+
+/** 归一化路径用于比较（去尾斜杠、正斜杠）。 */
+export function normalizePathForCompare(p: string): string {
+  return toPosix(p).replace(/\/+$/g, '')
+}
+
+/**
+ * 判断两个绝对路径是否指向同一位置。
+ * Windows 下大小写不敏感（D:/2-OGP 与 d:/2-ogp 视为同一目录）。
+ */
+export function samePath(a: string, b: string): boolean {
+  const na = normalizePathForCompare(a)
+  const nb = normalizePathForCompare(b)
+  return process.platform === 'win32' ? na.toLowerCase() === nb.toLowerCase() : na === nb
 }
 
 /** DSH 数据目录：$DSH_HOME，缺省 ~/.dsh。 */

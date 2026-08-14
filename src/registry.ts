@@ -7,7 +7,7 @@
  */
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import path from 'node:path'
-import { dshHome } from './utils.ts'
+import { dshHome, samePath } from './utils.ts'
 
 /** 一个由本插件创建（或接管）的独立仓库。 */
 export interface ForgeRepoEntry {
@@ -68,10 +68,10 @@ export async function saveRegistry(registry: ForgeRegistry): Promise<void> {
   await rename(tmp, file)
 }
 
-/** 新增或更新一个仓库条目（按 path 匹配），返回保存后的登记表。 */
+/** 新增或更新一个仓库条目（按 path 匹配，Windows 下大小写不敏感），返回保存后的登记表。 */
 export async function upsertRepo(entry: ForgeRepoEntry): Promise<ForgeRegistry> {
   const registry = await loadRegistry()
-  const index = registry.repos.findIndex((repo) => repo.path === entry.path)
+  const index = registry.repos.findIndex((repo) => samePath(repo.path, entry.path))
   const repos = index >= 0
     ? registry.repos.map((repo, i) => (i === index ? entry : repo))
     : [...registry.repos, entry]

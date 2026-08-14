@@ -13,6 +13,8 @@ export interface ChildPromptContext {
   readonly requirement: string
   /** kebab-case 插件名（同时是目录名）。 */
   readonly name: string
+  /** 本次是新建还是更新既有仓库。 */
+  readonly mode: 'create' | 'update'
   /** staging 目录绝对路径（子代理只能写这里）。 */
   readonly stagingDir: string
   /** deepseek-harness 检出根绝对路径。 */
@@ -27,13 +29,31 @@ export interface ChildPromptContext {
 
 /** 组装完整子代理提示词（中文，遵循用户全局 AGENTS.md 语言约定）。 */
 export function buildChildPrompt(context: ChildPromptContext): string {
-  const { requirement, name, stagingDir, harnessRoot, relativeHarnessPath, targetRoot, referenceRepos } = context
+  const {
+    requirement, name, mode, stagingDir, harnessRoot, relativeHarnessPath, targetRoot, referenceRepos,
+  } = context
   const referenceList = referenceRepos.length > 0
     ? referenceRepos.map((repo) => `- ${toPosix(repo)}`).join('\n')
     : '- （未配置参考仓库；直接对照 dsh-schedule / dsh-hotkeys 的通用结构）'
+  const modeSection = mode === 'update'
+    ? `## 更新模式（重要）
+
+这是对既有插件仓库 ${toPosix(targetRoot)}/${name} 的**更新**，不是从零新建：
+- 交付目录已由宿主**预填充**当前仓库的全部源文件，你只需在其基础上做需求要求的最小增量修改；
+- 先 read 交付目录现有代码，理解现有实现与约定，再动手；不要推倒重写（除非需求明确要求）；
+- 被需求触及的文件直接修改；未触及的文件保持原样（不要删除）；
+- 若需求要求删除某个现有文件，直接用删除工具从交付目录移除（宿主会同步删除目标仓库中的对应文件）；
+- 不要修改构建产物（lib/、node_modules/ 等，.gitignore 已覆盖）。
+
+`
+    : `## 新建模式
+
+交付目录当前为空，请从零创建完整插件；交付目录必须包含**完整**的新版文件集（文件清单见「仓库格式」）。
+
+`
   return `# 任务：开发一个 DSH（DeepSeek Harness）插件
 
-你是一个 DSH 插件开发 Agent。请根据下面的「需求」，在指定工作目录中从零开发一个完整、可构建、可安装的 DSH 插件，完成构建验证，并按规定格式汇报。全程自主完成，不要提问，不要使用 ask_user。
+你是一个 DSH 插件开发 Agent。请根据下面的「需求」，在指定工作目录中开发（或更新）一个完整、可构建、可安装的 DSH 插件，完成构建验证，并按规定格式汇报。全程自主完成，不要提问，不要使用 ask_user。
 
 ## 需求
 
@@ -43,7 +63,7 @@ ${requirement}
 
 ${toPosix(stagingDir)}
 
-## 必须遵循的规范（用户全局 AGENTS.md + 姐妹插件仓库约定）
+${modeSection}## 必须遵循的规范（用户全局 AGENTS.md + 姐妹插件仓库约定）
 
 ### 工具链（与姐妹仓库一致）
 - Node >= 22；pnpm@11.7.0（package.json 的 packageManager 字段）；TypeScript strict；tsdown 构建；vitest 测试（如适合）。

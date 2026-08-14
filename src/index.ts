@@ -91,6 +91,7 @@ export {
   copyInto,
   pathExists,
   rewriteHarnessLinks,
+  syncRemoveStale,
 } from './migrate.ts'
 export {
   commitStaged,
@@ -117,6 +118,8 @@ export {
   assertOk,
   cleanSummaryEn,
   buildCommitSubject,
+  fnv1a,
+  samePath,
   type ExecResult,
 } from './utils.ts'
 export {
@@ -126,6 +129,7 @@ export {
   assertNoRegistryHarnessDeps,
   type ChildReport,
   type ForgeArgs,
+  type ForgeLogger,
   type ForgeToolResult,
   type StartChild,
 } from './forge.ts'

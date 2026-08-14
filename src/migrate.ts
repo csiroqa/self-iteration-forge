@@ -5,12 +5,15 @@
  * 把 package.json 里的 deepseek-harness link: 依赖改写为目标目录的相对路径，
  * 并确保 .gitignore 覆盖 node_modules 等不该提交的内容。
  */
-import { access, cp, mkdir, readFile, writeFile } from 'node:fs/promises'
+import { access, cp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { relativeLink, toPosix } from './utils.ts'
 
 /** 复制时排除的目录（node_modules 体积大且可在目标目录重建）。 */
 const EXCLUDED_BASENAMES = new Set(['node_modules', '.git', '.pnpm-store'])
+
+/** 同步删除时保护的目录（仓库元数据与构建产物/依赖，不做源文件同步）。 */
+const SYNC_PROTECTED_BASENAMES = new Set(['.git', 'node_modules', '.pnpm-store', 'lib', 'dist'])
 
 /** 判断路径是否存在（文件或目录）。 */
 export async function pathExists(target: string): Promise<boolean> {
@@ -98,4 +101,45 @@ export async function ensureGitignore(dir: string): Promise<void> {
   const base = lines.join('\n').trimEnd()
   const content = `${base === '' ? '' : `${base}\n`}${missing.join('\n')}\n`
   await writeFile(file, content, 'utf8')
+}
+
+/**
+ * 删除 target 中存在但 source 中不存在的文件（更新同步语义）。
+ * .git / node_modules / .pnpm-store / lib / dist 受保护，不做同步删除；
+ * 空目录一并清理。返回删除的文件数量。
+ */
+export async function syncRemoveStale(source: string, target: string): Promise<number> {
+  let removed = 0
+  const walk = async (dir: string): Promise<void> => {
+    let entries
+    try {
+      entries = await readdir(dir, { withFileTypes: true })
+    } catch {
+      return
+    }
+    for (const entry of entries) {
+      if (SYNC_PROTECTED_BASENAMES.has(entry.name)) continue
+      const targetFull = path.join(dir, entry.name)
+      const rel = path.relative(target, targetFull)
+      const sourceFull = path.join(source, rel)
+      if (entry.isDirectory()) {
+        await walk(targetFull)
+        // 子目录处理完后，若为空且 source 无对应文件，删除该空目录。
+        try {
+          const remaining = await readdir(targetFull)
+          if (remaining.length === 0 && !(await pathExists(sourceFull))) {
+            await rm(targetFull, { recursive: true, force: true })
+            removed += 1
+          }
+        } catch {
+          // 已被并发清理或不存在，忽略。
+        }
+      } else if (!(await pathExists(sourceFull))) {
+        await rm(targetFull, { force: true })
+        removed += 1
+      }
+    }
+  }
+  await walk(target)
+  return removed
 }

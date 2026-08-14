@@ -27,7 +27,7 @@ import type { SubagentResult, SubagentRun } from '@deepseek-ai/dsh-subagent'
 import { mkdir, readFile, readdir, rm, stat } from 'node:fs/promises'
 import path from 'node:path'
 import { commitStaged, ensureGitRepo, stageAll } from './git.ts'
-import { copyInto, ensureGitignore, pathExists, rewriteHarnessLinks } from './migrate.ts'
+import { copyInto, ensureGitignore, pathExists, rewriteHarnessLinks, syncRemoveStale } from './migrate.ts'
 import { buildChildPrompt } from './prompt.ts'
 import { loadRegistry, upsertRepo, type ForgeRepoEntry } from './registry.ts'
 import {
@@ -36,6 +36,7 @@ import {
   normalizePluginName,
   relativeLink,
   runCommand,
+  samePath,
   slugFromRequirement,
   toPosix,
 } from './utils.ts'
@@ -71,6 +72,15 @@ export interface ForgeConfig {
 }
 
 const TOOL_NAME = 'forge_plugin'
+
+/** 进程内同名任务互斥：同一插件名同时只允许一个 forge 流程（防 staging/目标冲突）。 */
+const activeForge = new Set<string>()
+
+/** 最小日志面（execute 传入 ctx.logger；测试可不传）。 */
+export interface ForgeLogger {
+  info(message: string, ...args: unknown[]): void
+  warn(message: string, ...args: unknown[]): void
+}
 
 /** 子代理结果（stopReason + 全部文本）。 */
 export interface ChildOutcome {
@@ -300,18 +310,35 @@ export interface RunForgeOptions {
   readonly args: ForgeArgs
   readonly signal: AbortSignal
   readonly startChild: StartChild
+  /** 可选日志面（真实路径传 ctx.logger）。 */
+  readonly logger?: ForgeLogger
 }
 
 /**
  * forge 全流程编排（可测试核心）：
  * staging → 子代理开发 → 迁移 → 依赖守卫 → 目标构建验证 → 提交 → 登记。
  * 关键失败直接 throw（由工具注册表转为 isError 结果）。
+ * 同名任务进程内互斥（并发调用直接拒绝，不排队）。
  */
 export async function runForge(options: RunForgeOptions): Promise<ForgeToolResult> {
-  const { config, workspace, harnessRoot, args, signal, startChild } = options
-  const requirement = String(args.requirement ?? '')
+  const requirement = String(options.args.requirement ?? '')
   if (requirement.trim() === '') throw new Error('requirement 不能为空')
-  const name = normalizePluginName(args.name, slugFromRequirement(requirement))
+  const name = normalizePluginName(options.args.name, slugFromRequirement(requirement))
+  if (activeForge.has(name)) {
+    throw new Error(`同名 forge 任务进行中（${name}）：请等待其完成后再试。`)
+  }
+  activeForge.add(name)
+  try {
+    return await runForgeLocked(options, name)
+  } finally {
+    activeForge.delete(name)
+  }
+}
+
+/** runForge 的持锁主体（name 已归一化且互斥已获取）。 */
+async function runForgeLocked(options: RunForgeOptions, name: string): Promise<ForgeToolResult> {
+  const { config, workspace, harnessRoot, args, signal, startChild, logger } = options
+  const requirement = String(args.requirement ?? '')
   const targetRoot = args.targetRoot !== undefined && args.targetRoot.trim() !== ''
     ? path.resolve(args.targetRoot)
     : path.resolve(config.targetRoot)
@@ -332,15 +359,22 @@ export async function runForge(options: RunForgeOptions): Promise<ForgeToolResul
   if (migrate && targetExists && !update) {
     throw new Error(`目标目录已存在：${toPosix(target)}。请换一个 name，或设置 update=true 明确更新。`)
   }
+  const mode: 'create' | 'update' = update && targetExists ? 'update' : 'create'
+  logger?.info('forge_plugin: 开始%s插件 %s（staging=%s）', mode === 'update' ? '更新' : '生成', name, toPosix(staging))
 
   // 2. 清理并重建 staging。
   await rm(staging, { recursive: true, force: true })
   await mkdir(staging, { recursive: true })
+  // 更新模式：预填充现有源码，子代理只需增量修改（省去重读重写全部文件）。
+  if (mode === 'update') {
+    await copyInto(target, staging)
+  }
 
   // 3. 启动子代理开发。
   const promptText = buildChildPrompt({
     requirement,
     name,
+    mode,
     stagingDir: staging,
     harnessRoot,
     relativeHarnessPath: relativeLink(staging, harnessRoot),
@@ -353,7 +387,9 @@ export async function runForge(options: RunForgeOptions): Promise<ForgeToolResul
     signal,
     maxDepth: config.maxChildDepth,
   })
+  logger?.info('forge_plugin: 子代理完成 %s（%s）', name, child.stopReason)
   if (child.stopReason !== 'completed') {
+    logger?.warn('forge_plugin: 子代理未正常完成 %s（%s）', name, child.stopReason)
     throw new Error(
       `子代理未正常完成（${child.stopReason}）。staging 保留在 ${toPosix(staging)}。`
       + (child.text.trim() === '' ? '' : `\n部分输出：\n${child.text.slice(0, 4000)}`),
@@ -375,6 +411,10 @@ export async function runForge(options: RunForgeOptions): Promise<ForgeToolResul
   if (migrate) {
     migratedTo = target
     await copyInto(staging, migratedTo)
+    // 更新模式：同步删除目标中 staging 已不存在的源文件（防残留）。
+    if (mode === 'update') {
+      await syncRemoveStale(staging, migratedTo)
+    }
     const packageJson = path.join(migratedTo, 'package.json')
     if (await pathExists(packageJson)) {
       await rewriteHarnessLinks(packageJson, staging, migratedTo, harnessRoot)
@@ -383,9 +423,11 @@ export async function runForge(options: RunForgeOptions): Promise<ForgeToolResul
     await ensureGitignore(migratedTo)
     build = await verifyBuildInTarget(migratedTo, config)
     if (build !== 'passed') {
+      logger?.warn('forge_plugin: 迁移后构建验证失败 %s：%s', name, build)
       throw new Error(
         `迁移后构建验证失败：${build}\nstaging 保留在 ${toPosix(staging)}，目标目录为 ${toPosix(migratedTo)}。`
-        + ' 请检查 link 路径改写或依赖；修复后可对目标目录重试 pnpm install && pnpm build。',
+        + ' 请检查 link 路径改写或依赖；修复后可对目标目录重试 pnpm install && pnpm build，'
+        + ' 重试 forge 时请带 update=true（目标目录已存在）。',
       )
     }
     // 功能完成 → 立即提交（非定时）；提交前 stageAll 已检查 diff。
@@ -398,9 +440,10 @@ export async function runForge(options: RunForgeOptions): Promise<ForgeToolResul
         email: config.gitAuthorEmail,
       })
       committed = true
+      logger?.info('forge_plugin: 已提交 %s：%s', toPosix(migratedTo), commitSubject)
     }
     const migratedPath = toPosix(migratedTo)
-    const previous = (await loadRegistry()).repos.find((repo) => repo.path === migratedPath)
+    const previous = (await loadRegistry()).repos.find((repo) => samePath(repo.path, migratedPath))
     const entry: ForgeRepoEntry = {
       name,
       path: migratedPath,
@@ -510,7 +553,15 @@ export function registerForgeTool(ctx: Context, config: ForgeConfig): () => void
         return collectChild(run)
       }
 
-      return runForge({ config, workspace, harnessRoot, args, signal: exec.signal, startChild })
+      return runForge({
+        config,
+        workspace,
+        harnessRoot,
+        args,
+        signal: exec.signal,
+        startChild,
+        logger: ctx.logger,
+      })
     },
   }))
 }
