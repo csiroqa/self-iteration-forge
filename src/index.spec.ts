@@ -8,7 +8,7 @@ import { mkdtemp, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { ensureGitignore, rewriteHarnessLinks, syncRemoveStale } from './migrate.ts'
+import { ensureGitignore, rewriteCiHarnessPaths, rewriteHarnessLinks, syncRemoveStale } from './migrate.ts'
 import { assertNoRegistryHarnessDeps } from './forge.ts'
 import { commitStaged, ensureGitRepo, stageAll } from './git.ts'
 import { loadRegistry, saveRegistry } from './registry.ts'
@@ -237,6 +237,46 @@ describe('syncRemoveStale（更新同步语义）', () => {
     await expect(stat(path.join(target, '.git', 'config'))).resolves.toBeDefined()
     await expect(stat(path.join(target, 'node_modules', 'dep.js'))).resolves.toBeDefined()
     await expect(stat(path.join(target, 'lib', 'index.js'))).resolves.toBeDefined()
+  })
+})
+
+describe('rewriteCiHarnessPaths', () => {
+  it('把 ci.yml 中的 deepseek-harness 相对路径对齐到目标深度', async () => {
+    const staging = path.join(tempRoot, 'staging', 'inner', 'pkg')
+    const target = path.join(tempRoot, 'repos', 'pkg')
+    const harness = path.join(tempRoot, 'deepseek-harness')
+    const ciDir = path.join(staging, '.github', 'workflows')
+    await mkdir(ciDir, { recursive: true })
+    const ciPath = path.join(ciDir, 'ci.yml')
+    await writeFile(ciPath, [
+      '      # 依赖以 link: 指向 ../../../deepseek-harness（交付目录前缀）',
+      '      - name: Checkout deepseek-harness (sibling)',
+      '        run: git clone --depth 1 https://github.com/deepseek-ai/deepseek-harness ../../../deepseek-harness',
+      '      - name: Build harness libraries',
+      '        working-directory: ../../../deepseek-harness',
+      '        run: pnpm install',
+      '',
+    ].join('\n'))
+
+    const replaced = await rewriteCiHarnessPaths(ciPath, target, harness)
+    expect(replaced).toBe(3)
+    const rewritten = await readFile(ciPath, 'utf8')
+    // 替换后应为 target → harness 的完整相对路径（relativeLink 本身已含 deepseek-harness 结尾）。
+    const expected = relativeLink(target, harness)
+    expect(rewritten).not.toContain('../../../deepseek-harness')
+    expect(rewritten).not.toContain(`${expected}/deepseek-harness`)
+    expect(rewritten).toContain(`git clone --depth 1 https://github.com/deepseek-ai/deepseek-harness ${expected}`)
+    expect(rewritten).toContain(`working-directory: ${expected}`)
+  })
+
+  it('文件不存在或无匹配时返回 0', async () => {
+    const missing = path.join(tempRoot, 'nope.yml')
+    expect(await rewriteCiHarnessPaths(missing, tempRoot, path.join(tempRoot, 'deepseek-harness'))).toBe(0)
+    const dir = path.join(tempRoot, 'pkg')
+    await mkdir(dir, { recursive: true })
+    const ciPath = path.join(dir, 'ci.yml')
+    await writeFile(ciPath, 'name: ci\non: [push]\n')
+    expect(await rewriteCiHarnessPaths(ciPath, tempRoot, path.join(tempRoot, 'deepseek-harness'))).toBe(0)
   })
 })
 

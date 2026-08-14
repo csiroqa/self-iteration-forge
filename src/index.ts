@@ -91,6 +91,7 @@ export {
   copyInto,
   pathExists,
   rewriteHarnessLinks,
+  rewriteCiHarnessPaths,
   syncRemoveStale,
 } from './migrate.ts'
 export {
@@ -127,6 +128,7 @@ export {
   runForge,
   cleanupStaleStaging,
   assertNoRegistryHarnessDeps,
+  verifyBuildInTarget,
   type ChildReport,
   type ForgeArgs,
   type ForgeLogger,

@@ -27,7 +27,7 @@ import type { SubagentResult, SubagentRun } from '@deepseek-ai/dsh-subagent'
 import { mkdir, readFile, readdir, rm, stat } from 'node:fs/promises'
 import path from 'node:path'
 import { commitStaged, ensureGitRepo, stageAll } from './git.ts'
-import { copyInto, ensureGitignore, pathExists, rewriteHarnessLinks, syncRemoveStale } from './migrate.ts'
+import { copyInto, ensureGitignore, pathExists, rewriteCiHarnessPaths, rewriteHarnessLinks, syncRemoveStale } from './migrate.ts'
 import { buildChildPrompt } from './prompt.ts'
 import { loadRegistry, upsertRepo, type ForgeRepoEntry } from './registry.ts'
 import {
@@ -221,7 +221,7 @@ function renderResult(value: JsonValue): string {
 }
 
 /** 在目标目录重新安装并构建，验证迁移结果；返回 'passed' 或失败原因。 */
-async function verifyBuildInTarget(target: string, config: ForgeConfig): Promise<string> {
+export async function verifyBuildInTarget(target: string, config: ForgeConfig): Promise<string> {
   try {
     await runCommand('pnpm', ['install'], { cwd: target, timeoutMs: config.childTimeoutMs })
     await runCommand('pnpm', ['build'], { cwd: target, timeoutMs: config.childTimeoutMs })
@@ -420,6 +420,12 @@ async function runForgeLocked(options: RunForgeOptions, name: string): Promise<F
       await rewriteHarnessLinks(packageJson, staging, migratedTo, harnessRoot)
       await assertNoRegistryHarnessDeps(packageJson, harnessRoot)
     }
+    // CI 里的 deepseek-harness 相对路径也要从 staging 深度对齐到目标深度。
+    await rewriteCiHarnessPaths(
+      path.join(migratedTo, '.github', 'workflows', 'ci.yml'),
+      migratedTo,
+      harnessRoot,
+    )
     await ensureGitignore(migratedTo)
     build = await verifyBuildInTarget(migratedTo, config)
     if (build !== 'passed') {

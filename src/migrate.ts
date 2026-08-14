@@ -104,6 +104,29 @@ export async function ensureGitignore(dir: string): Promise<void> {
 }
 
 /**
+ * 改写 .github/workflows/ci.yml 中指向 deepseek-harness 的相对路径
+ * （git clone 目标、working-directory 等），使其从 staging 深度对齐到
+ * 目标目录深度——与 package.json 的 link: 改写配套，否则 CI 会 clone
+ * 到错误位置。返回被替换的路径出现次数；文件不存在或无匹配返回 0。
+ */
+export async function rewriteCiHarnessPaths(ciPath: string, toDir: string, harnessRoot: string): Promise<number> {
+  let text: string
+  try {
+    text = await readFile(ciPath, 'utf8')
+  } catch {
+    return 0
+  }
+  const pattern = /(\.\.\/)+deepseek-harness/g
+  const occurrences = text.match(pattern) ?? []
+  if (occurrences.length === 0) return 0
+  // relativeLink 已经是以 deepseek-harness 结尾的完整相对路径，直接整体替换，
+  // 不要再用 posix.join 追加目录名（会双写成 …/deepseek-harness/deepseek-harness）。
+  const replacement = relativeLink(toDir, harnessRoot)
+  await writeFile(ciPath, text.replace(pattern, replacement), 'utf8')
+  return occurrences.length
+}
+
+/**
  * 删除 target 中存在但 source 中不存在的文件（更新同步语义）。
  * .git / node_modules / .pnpm-store / lib / dist 受保护，不做同步删除；
  * 空目录一并清理。返回删除的文件数量。
