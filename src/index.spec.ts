@@ -116,6 +116,38 @@ describe('rewriteHarnessLinks', () => {
     const changed = await rewriteHarnessLinks(pkgPath, staging, target, harness)
     expect(changed).toBe(0)
   })
+
+  it('update 预填充场景：已为目标深度的链接保持幂等', async () => {
+    const staging = path.join(tempRoot, 'staging', 'deep', 'pkg')
+    const target = path.join(tempRoot, 'repos', 'pkg')
+    const harness = path.join(tempRoot, 'deepseek-harness')
+    await mkdir(staging, { recursive: true })
+    const pkgPath = path.join(staging, 'package.json')
+    // 预填充自 target：链接文本已是目标深度 ../deepseek-harness。
+    const targetLink = `link:${relativeLink(target, harness)}/vendor/cordis`
+    await writeFile(pkgPath, JSON.stringify({ dependencies: { '@deepseek-ai/cordis': targetLink } }))
+    const changed = await rewriteHarnessLinks(pkgPath, staging, target, harness)
+    expect(changed).toBe(0)
+    const pkg = JSON.parse(await readFile(pkgPath, 'utf8')) as { dependencies: Record<string, string> }
+    expect(pkg.dependencies['@deepseek-ai/cordis']).toBe(targetLink)
+  })
+
+  it('update 子代理误写任意深度时归一化到目标深度', async () => {
+    const staging = path.join(tempRoot, 'staging', 'pkg')
+    const target = path.join(tempRoot, 'repos', 'pkg')
+    const harness = path.join(tempRoot, 'deepseek-harness')
+    await mkdir(staging, { recursive: true })
+    const pkgPath = path.join(staging, 'package.json')
+    // 子代理按 create 模板误写 staging 深度前缀。
+    await writeFile(pkgPath, JSON.stringify({
+      dependencies: { '@deepseek-ai/cordis': 'link:../../../deepseek-harness/vendor/cordis' },
+    }))
+    const changed = await rewriteHarnessLinks(pkgPath, staging, target, harness)
+    expect(changed).toBe(1)
+    const pkg = JSON.parse(await readFile(pkgPath, 'utf8')) as { dependencies: Record<string, string> }
+    expect(pkg.dependencies['@deepseek-ai/cordis'])
+      .toBe(`link:${relativeLink(target, harness)}/vendor/cordis`)
+  })
 })
 
 describe('ensureGitignore', () => {

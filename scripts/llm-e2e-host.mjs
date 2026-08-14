@@ -26,26 +26,28 @@ import {
   rewriteCiHarnessPaths,
   rewriteHarnessLinks,
   stageAll,
+  syncRemoveStale,
   toPosix,
   upsertRepo,
   verifyBuildInTarget,
 } from '../lib/index.js'
 
 function usage() {
-  console.error('用法（注意参数顺序，requirement 在最后）：')
-  console.error('  node scripts/llm-e2e-host.mjs prompt <name> <stagingDir> <targetRoot> <harnessRoot> <requirement>')
-  console.error('  node scripts/llm-e2e-host.mjs run <name> <stagingDir> <targetRoot> <harnessRoot> <commitSubject>')
+  console.error('用法（注意参数顺序，requirement/subject 在最后；可选第 7 参数）：')
+  console.error('  node scripts/llm-e2e-host.mjs prompt <name> <stagingDir> <targetRoot> <harnessRoot> <requirement> [create|update]')
+  console.error('  node scripts/llm-e2e-host.mjs run <name> <stagingDir> <targetRoot> <harnessRoot> <commitSubject> [--update]')
   process.exit(2)
 }
 
-const [, , mode, name, stagingDir, targetRoot, harnessRoot, extra] = process.argv
+const [, , mode, name, stagingDir, targetRoot, harnessRoot, extra, flag] = process.argv
 
 if (mode === 'prompt') {
   if (name === undefined || stagingDir === undefined || targetRoot === undefined || harnessRoot === undefined || extra === undefined) usage()
+  const childMode = flag === 'update' ? 'update' : 'create'
   const promptText = buildChildPrompt({
     requirement: extra,
     name,
-    mode: 'create',
+    mode: childMode,
     stagingDir,
     harnessRoot,
     relativeHarnessPath: path.relative(stagingDir, harnessRoot).split(path.sep).join('/'),
@@ -63,6 +65,7 @@ if (mode === 'prompt') {
 if (mode === 'run') {
   if (name === undefined || stagingDir === undefined || targetRoot === undefined || harnessRoot === undefined || extra === undefined) usage()
   const commitSubject = extra
+  const isUpdate = flag === '--update'
   const staging = path.resolve(stagingDir)
   const target = path.resolve(targetRoot, name)
   const harness = path.resolve(harnessRoot)
@@ -70,12 +73,20 @@ if (mode === 'run') {
   // 0. staging 校验。
   const files = await readdir(staging, { withFileTypes: true })
   if (files.length === 0) throw new Error(`staging 为空：${toPosix(staging)}`)
-  if (await pathExists(target)) {
-    throw new Error(`目标目录已存在：${toPosix(target)}（本脚本不做 update 合并，先人工确认）`)
+  const targetExists = await pathExists(target)
+  if (targetExists && !isUpdate) {
+    throw new Error(`目标目录已存在：${toPosix(target)}（更新请传 --update）`)
+  }
+  if (!targetExists && isUpdate) {
+    throw new Error(`--update 但目标目录不存在：${toPosix(target)}（首次创建不要传 --update）`)
   }
 
-  console.log(`[1/6] 迁移 staging → ${toPosix(target)}`)
+  console.log(`[1/6] 迁移 staging → ${toPosix(target)}（${isUpdate ? '更新：合并 + 同步删除' : '新建'}）`)
   await copyInto(staging, target)
+  if (isUpdate) {
+    const removed = await syncRemoveStale(staging, target)
+    console.log(`      同步删除过期文件：${removed} 个`)
+  }
 
   const packageJson = path.join(target, 'package.json')
   if (await pathExists(packageJson)) {
@@ -121,12 +132,14 @@ if (mode === 'run') {
 
   console.log('[5/6] 登记进 $DSH_HOME/plugin-forge.json')
   const migratedPath = toPosix(target)
+  const { loadRegistry } = await import('../lib/index.js')
+  const previous = (await loadRegistry()).repos.find((repo) => repo.path.toLowerCase() === migratedPath.toLowerCase())
   await upsertRepo({
     name,
     path: migratedPath,
-    createdAt: new Date().toISOString(),
-    lastCommitAt: hasChanges ? new Date().toISOString() : undefined,
-    commitCount: hasChanges ? 1 : 0,
+    createdAt: previous?.createdAt ?? new Date().toISOString(),
+    lastCommitAt: hasChanges ? new Date().toISOString() : previous?.lastCommitAt,
+    commitCount: (previous?.commitCount ?? 0) + (hasChanges ? 1 : 0),
   })
 
   console.log('[6/6] 完成')

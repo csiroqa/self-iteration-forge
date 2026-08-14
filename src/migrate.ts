@@ -7,7 +7,7 @@
  */
 import { access, cp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
-import { relativeLink, toPosix } from './utils.ts'
+import { relativeLink } from './utils.ts'
 
 /** 复制时排除的目录（node_modules 体积大且可在目标目录重建）。 */
 const EXCLUDED_BASENAMES = new Set(['node_modules', '.git', '.pnpm-store'])
@@ -45,7 +45,7 @@ export async function copyInto(source: string, target: string): Promise<void> {
  */
 export async function rewriteHarnessLinks(
   packageJsonPath: string,
-  fromDir: string,
+  _fromDir: string,
   toDir: string,
   harnessRoot: string,
 ): Promise<number> {
@@ -54,18 +54,25 @@ export async function rewriteHarnessLinks(
     dependencies?: Record<string, string>
     devDependencies?: Record<string, string>
   }
-  const harnessPrefix = `${toPosix(path.resolve(harnessRoot))}/`
+  // 目标深度前缀（如 ../deepseek-harness）。
+  const targetPrefix = relativeLink(toDir, harnessRoot)
   let changed = 0
   for (const section of ['dependencies', 'devDependencies'] as const) {
     const deps = pkg[section]
     if (deps === undefined) continue
     for (const [dep, spec] of Object.entries(deps)) {
       if (typeof spec !== 'string' || !spec.startsWith('link:')) continue
-      const absolute = toPosix(path.resolve(fromDir, spec.slice('link:'.length)))
-      if (absolute !== toPosix(path.resolve(harnessRoot)) && !absolute.startsWith(harnessPrefix)) continue
-      const rel = relativeLink(toDir, absolute)
-      if (rel !== spec.slice('link:'.length)) {
-        deps[dep] = `link:${rel}`
+      const linkPath = spec.slice('link:'.length)
+      // 只处理指向 deepseek-harness 的链接；保留其后的子路径（/vendor/cordis 等）。
+      // 统一归一化到目标目录深度，覆盖三种场景：
+      //   create（staging 深度 ../../../）、update 预填充（已是目标深度 ../，幂等不变）、
+      //   子代理误写任意深度。
+      const marker = linkPath.indexOf('deepseek-harness')
+      if (marker < 0) continue
+      const suffix = linkPath.slice(marker + 'deepseek-harness'.length)
+      const desired = `${targetPrefix}${suffix}`
+      if (linkPath !== desired) {
+        deps[dep] = `link:${desired}`
         changed += 1
       }
     }
