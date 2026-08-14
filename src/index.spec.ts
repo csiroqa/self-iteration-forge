@@ -9,9 +9,10 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { ensureGitignore, rewriteHarnessLinks } from './migrate.ts'
+import { assertNoRegistryHarnessDeps } from './forge.ts'
 import { commitStaged, ensureGitRepo, stageAll } from './git.ts'
 import { loadRegistry, saveRegistry } from './registry.ts'
-import { normalizePluginName, relativeLink, slugFromRequirement, toPosix } from './utils.ts'
+import { buildCommitSubject, normalizePluginName, relativeLink, slugFromRequirement, toPosix } from './utils.ts'
 
 let tempRoot: string
 let savedHome: string | undefined
@@ -132,6 +133,58 @@ describe('registry', () => {
     expect(loaded.repos).toHaveLength(1)
     expect(loaded.repos[0]?.name).toBe('demo')
     expect(loaded.repos[0]?.commitCount).toBe(1)
+  })
+})
+
+describe('buildCommitSubject（Conventional Commit 卫生）', () => {
+  it('组装 type: name: summary 且总长 ≤72', () => {
+    const subject = buildCommitSubject('feat', 'web-search-memo', 'add keyword search for session memos')
+    expect(subject).toBe('feat: web-search-memo: add keyword search for session memos')
+    expect(subject.length).toBeLessThanOrEqual(72)
+  })
+
+  it('清洗非 ASCII 与换行', () => {
+    expect(buildCommitSubject('feat', 'demo', '中文摘要\n带换行')).toBe('feat: demo')
+    expect(buildCommitSubject('feat', 'demo', 'hello\nworld')).toBe('feat: demo: hello world')
+  })
+
+  it('超长摘要按 72 字符预算截断', () => {
+    const subject = buildCommitSubject('feat', 'a-very-long-plugin-name', 'x'.repeat(200))
+    expect(subject.length).toBeLessThanOrEqual(72)
+    expect(subject.startsWith('feat: a-very-long-plugin-name: ')).toBe(true)
+  })
+
+  it('非法 commitType 回退为 feat', () => {
+    expect(buildCommitSubject('Bad Type!', 'demo', 'ok')).toBe('feat: demo: ok')
+  })
+
+  it('无摘要时只输出 type: name', () => {
+    expect(buildCommitSubject('fix', 'demo', undefined)).toBe('fix: demo')
+    expect(buildCommitSubject('fix', 'demo', '   ')).toBe('fix: demo')
+  })
+})
+
+describe('assertNoRegistryHarnessDeps', () => {
+  it('拒绝 registry 版本号的 @deepseek-ai/* 依赖', async () => {
+    const dir = path.join(tempRoot, 'pkg')
+    await mkdir(dir, { recursive: true })
+    const pkgPath = path.join(dir, 'package.json')
+    await writeFile(pkgPath, JSON.stringify({
+      dependencies: { '@deepseek-ai/dsh-llm': '^0.1.0', 'normal-dep': '^1.0.0' },
+      devDependencies: { '@deepseek-ai/cordis': 'link:../deepseek-harness/vendor/cordis' },
+    }))
+    await expect(assertNoRegistryHarnessDeps(pkgPath, path.join(tempRoot, 'deepseek-harness')))
+      .rejects.toThrow(/dsh-llm/)
+  })
+
+  it('全部 link: 时通过', async () => {
+    const dir = path.join(tempRoot, 'pkg')
+    await mkdir(dir, { recursive: true })
+    const pkgPath = path.join(dir, 'package.json')
+    await writeFile(pkgPath, JSON.stringify({
+      dependencies: { '@deepseek-ai/cordis': 'link:../deepseek-harness/vendor/cordis' },
+    }))
+    await expect(assertNoRegistryHarnessDeps(pkgPath, path.join(tempRoot, 'deepseek-harness'))).resolves.toBeUndefined()
   })
 })
 

@@ -8,7 +8,9 @@ import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import {
+  assertNoRegistryHarnessDeps,
   assertOk,
+  buildCommitSubject,
   commitStaged,
   ensureGitignore,
   ensureGitRepo,
@@ -32,16 +34,36 @@ function check(name, condition, detail = '') {
 }
 
 const root = await mkdtemp(path.join(tmpdir(), 'plugin-forge-smoke-'))
+const harness = path.join(root, 'deepseek-harness')
 try {
   console.log('plugin-forge smoke: lib 加载成功')
 
   check('normalizePluginName', normalizePluginName('My Cool Plugin!', 'x') === 'my-cool-plugin')
   check('slugFromRequirement', slugFromRequirement('Create a plugin for web search memo') === 'web-search-memo')
+  check(
+    'buildCommitSubject',
+    buildCommitSubject('feat', 'web-search-memo', 'add keyword search for session memos')
+      === 'feat: web-search-memo: add keyword search for session memos',
+  )
+  check('buildCommitSubject 超长截断', buildCommitSubject('feat', 'x', 'y'.repeat(200)).length <= 72)
+
+  // 依赖守卫。
+  const guarded = path.join(root, 'guarded')
+  await mkdir(guarded, { recursive: true })
+  await writeFile(path.join(guarded, 'package.json'), JSON.stringify({
+    dependencies: { '@deepseek-ai/dsh-llm': '^0.1.0' },
+  }))
+  let guardRejected = false
+  try {
+    await assertNoRegistryHarnessDeps(path.join(guarded, 'package.json'), harness)
+  } catch {
+    guardRejected = true
+  }
+  check('assertNoRegistryHarnessDeps 拒绝 registry 版本', guardRejected)
 
   // link 改写（staging 比 target 深两级，必须改写前缀）。
   const staging = path.join(root, 'staging', 'inner', 'pkg')
   const target = path.join(root, 'repos', 'pkg')
-  const harness = path.join(root, 'deepseek-harness')
   await mkdir(staging, { recursive: true })
   const pkgPath = path.join(staging, 'package.json')
   await writeFile(pkgPath, JSON.stringify({
