@@ -47,7 +47,25 @@ plugin-forge 已创建的插件仓库（1 个）：
 
 ## 更新既有插件
 
-再次调用 `forge_plugin` 并传 `update: true` 即可更新已存在的仓库（目标目录存在且未开 `update` 时会被拒绝，防止误覆盖）；更新完成后同样立即提交一次并累计提交次数。
+再次调用 `forge_plugin` 并传 `update: true` 即可更新已存在的仓库（目标目录存在且未开 `update` 时会被拒绝，防止误覆盖）：
+
+- 宿主会**预填充** staging（复制现有仓库源码），子代理只需做增量修改，不必重读重写全部文件
+- 子代理在交付目录删除的文件，迁移时会**同步删除**目标仓库中的对应文件（防残留）
+- 更新完成后同样立即提交一次并累计提交次数
+
+## 自迭代工作流示例（设计意图）
+
+```text
+你（用户）：做一个插件，把每次会话结束时自动归档到本地文件夹
+AI：调用 forge_plugin(requirement=..., name="session-auto-archive")
+  → 新 Agent 开发、构建验证、迁移到 D:/2-OGP/session-auto-archive、提交
+  → 返回：独立仓库 + 提交摘要
+你（用户）：给 session-auto-archive 增加"归档后发送系统通知"功能
+AI：调用 forge_plugin(requirement=..., name="session-auto-archive", update=true)
+  → 预填充现有代码 → 增量修改 → 同步删除 → 再次提交
+```
+
+每个功能的完成都形成一次可回退提交；深度限制（`maxChildDepth=2`）保证迭代可控。
 
 ## 质量保障（迁移防线）
 

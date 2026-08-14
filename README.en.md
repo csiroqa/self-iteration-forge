@@ -32,7 +32,25 @@ Lists forge-created repos inside the chat: name, path, **HEAD commit, whether th
 
 ## Updating an existing plugin
 
-Call `forge_plugin` again with `update: true` to update an existing repo (updates are rejected without `update: true` to prevent accidental overwrites); the update is committed immediately and the commit count is incremented.
+Call `forge_plugin` again with `update: true` to update an existing repo (updates are rejected without `update: true` to prevent accidental overwrites):
+
+- The host **pre-fills staging** with the current repo sources, so the child agent only makes incremental changes instead of re-reading/re-writing every file
+- Files the child removes from the staging directory are **synced out of the target repo** during migration (no leftovers)
+- The update is committed immediately and the commit count is incremented
+
+## Self-iteration workflow example (design intent)
+
+```text
+You: build a plugin that auto-archives each session to a local folder when it ends
+AI: calls forge_plugin(requirement=..., name="session-auto-archive")
+  → a fresh agent develops, verifies the build, migrates to D:/2-OGP/session-auto-archive, commits
+  → returns: repo path + commit summary
+You: add a system notification after archiving in session-auto-archive
+AI: calls forge_plugin(requirement=..., name="session-auto-archive", update=true)
+  → pre-fills existing code → incremental changes → sync deletion → commits again
+```
+
+Every completed feature becomes a revertible commit; the depth cap (`maxChildDepth=2`) keeps iteration controlled.
 
 ## Quality guards (migration defenses)
 
