@@ -28,7 +28,19 @@ Pipeline:
 
 ### `/forge status`
 
-Lists forge-created repos inside the chat: name, path, last commit time, commit count.
+Lists forge-created repos inside the chat: name, path, **HEAD commit, whether the working tree is clean**, last commit time, commit count.
+
+## Updating an existing plugin
+
+Call `forge_plugin` again with `update: true` to update an existing repo (updates are rejected without `update: true` to prevent accidental overwrites); the update is committed immediately and the commit count is incremented.
+
+## Quality guards (migration defenses)
+
+- Child-agent build verification in staging (`typecheck` / `test` / `build`)
+- Re-run `pnpm install && pnpm build` in the target after migration
+- Verify that `main` / `types` declared in `package.json` actually exist after the build (prevents `.mjs`/declaration mismatches)
+- Reject `@deepseek-ai/*` deps written as registry versions (must be `link:`ed to the local deepseek-harness checkout)
+- Idempotently ensure `.gitignore`; diff checked before commit; commit subjects cleaned to Conventional Commits ≤72 chars
 
 ## Configuration
 
@@ -46,6 +58,8 @@ All keys are optional (defaults live in `src/index.ts`):
 | `push` | `false` | Whether to push after commit (off by default) |
 | `gitAuthorName` / `gitAuthorEmail` | `csiroqa` / `justinwangyj@163.com` | Fallback author identity when the repo has none configured |
 | `keepStaging` | `true` | Keep the staging directory after success (easier debugging) |
+| `referenceRepos` | 4 sibling repos | Reference repos listed in the child prompt (toolchain/format/style) |
+| `stagingTtlDays` | `0` | Staging retention days; older staging dirs are cleaned on the next forge call; `0` = never clean |
 
 ## Install
 

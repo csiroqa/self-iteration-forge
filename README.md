@@ -37,7 +37,25 @@ English: [README.en.md](README.en.md)
 
 ### /forge status
 
-会话内查询已创建的插件仓库：名称、路径、最近提交时间、累计提交次数。
+会话内查询已创建的插件仓库：名称、路径、**HEAD 提交、工作区是否干净**、最近提交时间、累计提交次数。示例：
+
+```text
+plugin-forge 已创建的插件仓库（1 个）：
+- plugin-forge（D:/2-OGP/plugin-forge）
+  HEAD：f4e016c feat: add plugin-forge: agent-driven DSH plugin factory…；工作区：干净；最近提交：2026/7/8 05:43，累计 1 次
+```
+
+## 更新既有插件
+
+再次调用 `forge_plugin` 并传 `update: true` 即可更新已存在的仓库（目标目录存在且未开 `update` 时会被拒绝，防止误覆盖）；更新完成后同样立即提交一次并累计提交次数。
+
+## 质量保障（迁移防线）
+
+- 子代理构建验证（staging 内 `typecheck` / `test` / `build`）
+- 迁移后目标目录重新 `pnpm install && pnpm build`
+- 校验 `package.json` 的 `main` / `types` 指向的文件真实存在（防 `.mjs` 与声明不一致）
+- 校验没有写成 registry 版本号的 `@deepseek-ai/*` 依赖（必须 `link:` 指向本地 deepseek-harness）
+- 幂等补齐 `.gitignore`；提交前检查 diff；commit subject 按 Conventional Commits ≤72 字符清洗
 
 ## 配置
 
@@ -55,6 +73,8 @@ English: [README.en.md](README.en.md)
 | `push` | `false` | 是否提交后 push（默认不推送） |
 | `gitAuthorName` / `gitAuthorEmail` | `csiroqa` / `justinwangyj@163.com` | 仓库未配置 git 身份时的作者回退 |
 | `keepStaging` | `true` | 成功后是否保留 staging 目录（便于排查） |
+| `referenceRepos` | 4 个姐妹仓库 | 子代理提示词中列出的参考仓库（工具链/格式/风格对照） |
+| `stagingTtlDays` | `0` | staging 保留天数；超过则在下一次 forge 调用时清理；`0` = 不清理 |
 
 ## 安装
 
