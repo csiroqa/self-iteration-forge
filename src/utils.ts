@@ -36,13 +36,15 @@ export class CommandFailedError extends Error {
 }
 
 /**
- * Windows 下 pnpm/npm 是 .cmd 包装器，execFile 不会自动解析；
- * 这里统一返回可直接 CreateProcess 的可执行名。
+ * Windows 下 pnpm/npm 是 .cmd 包装器，CreateProcess 无法直接执行
+ * （execFile 会抛 EINVAL），必须经 cmd.exe 中转；/s 让 cmd 正确
+ * 处理带引号的整条命令。其余可执行文件直接 spawn。
  */
-function executableName(bin: string): string {
-  if (process.platform !== 'win32') return bin
-  if (bin === 'pnpm' || bin === 'npm' || bin === 'npx') return `${bin}.cmd`
-  return bin
+function resolveSpawn(bin: string, args: readonly string[]): { file: string; args: string[] } {
+  if (process.platform === 'win32' && (bin === 'pnpm' || bin === 'npm' || bin === 'npx')) {
+    return { file: process.env.COMSPEC ?? 'cmd.exe', args: ['/d', '/s', '/c', `${bin}.cmd`, ...args] }
+  }
+  return { file: bin, args: [...args] }
 }
 
 /** 运行外部命令并完整捕获输出（host 半区代码，非沙箱 shell）。 */
@@ -51,10 +53,11 @@ export function runCommand(
   args: readonly string[],
   options: { cwd: string; timeoutMs?: number },
 ): Promise<ExecResult> {
+  const { file, args: spawnArgs } = resolveSpawn(bin, args)
   return new Promise<ExecResult>((resolve, reject) => {
     execFile(
-      executableName(bin),
-      [...args],
+      file,
+      spawnArgs,
       {
         cwd: options.cwd,
         windowsHide: true,
@@ -153,4 +156,34 @@ export async function findHarnessRoot(startDir: string): Promise<string> {
     `找不到 deepseek-harness 检出（从 ${startDir} 向上 10 层内均无 vendor/cordis 标记）。`
     + ' 请在插件配置中设置 harnessRoot。',
   )
+}
+
+/**
+ * 清洗子代理给出的英文摘要，使其适合作为 Conventional Commit 的
+ * 主题一部分：只保留可打印 ASCII、空白折叠、按字符数截断。
+ */
+export function cleanSummaryEn(input: string | undefined): string {
+  if (input === undefined) return ''
+  return input
+    .replace(/\s+/g, ' ')
+    .replace(/[^\x20-\x7E]/g, '')
+    .trim()
+}
+
+/**
+ * 组装英文 Conventional Commit 主题（header ≤ 72 字符）：
+ * `<type>: <name>[: <summary>]`。summary 过长时按剩余预算截断。
+ */
+export function buildCommitSubject(
+  commitType: string,
+  name: string,
+  summaryEn: string | undefined,
+): string {
+  const type = /^[a-z][a-z0-9-]*$/.test(commitType) ? commitType : 'feat'
+  const summary = cleanSummaryEn(summaryEn)
+  if (summary === '') return `${type}: ${name}`
+  const prefix = `${type}: ${name}: `
+  const budget = 72 - prefix.length
+  const clipped = budget > 0 ? summary.slice(0, budget) : ''
+  return clipped === '' ? `${type}: ${name}` : `${prefix}${clipped}`
 }

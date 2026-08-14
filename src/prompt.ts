@@ -21,11 +21,16 @@ export interface ChildPromptContext {
   readonly relativeHarnessPath: string
   /** 迁移目标根目录（独立仓库所在）。 */
   readonly targetRoot: string
+  /** 参考仓库（姐妹插件）绝对路径列表，用于工具链/格式/风格对照。 */
+  readonly referenceRepos: readonly string[]
 }
 
 /** 组装完整子代理提示词（中文，遵循用户全局 AGENTS.md 语言约定）。 */
 export function buildChildPrompt(context: ChildPromptContext): string {
-  const { requirement, name, stagingDir, harnessRoot, relativeHarnessPath, targetRoot } = context
+  const { requirement, name, stagingDir, harnessRoot, relativeHarnessPath, targetRoot, referenceRepos } = context
+  const referenceList = referenceRepos.length > 0
+    ? referenceRepos.map((repo) => `- ${toPosix(repo)}`).join('\n')
+    : '- （未配置参考仓库；直接对照 dsh-schedule / dsh-hotkeys 的通用结构）'
   return `# 任务：开发一个 DSH（DeepSeek Harness）插件
 
 你是一个 DSH 插件开发 Agent。请根据下面的「需求」，在指定工作目录中从零开发一个完整、可构建、可安装的 DSH 插件，完成构建验证，并按规定格式汇报。全程自主完成，不要提问，不要使用 ask_user。
@@ -48,7 +53,7 @@ ${toPosix(stagingDir)}
 ### 仓库格式（逐项对照姐妹仓库，开发前先通读参考仓库）
 - package.json：private、type module、main/types 指向 lib/index.js|d.ts、exports（"." 与 "./package.json"，如有浏览器半区再加 "./client"）、dsh.bundle.patch=./cordis.patch.yml（如有浏览器半区再加 dsh.client 声明）、scripts（build=tsdown、typecheck=tsc --noEmit、test=vitest run、watch=tsdown --watch）、keywords、author "csiroqa <justinwangyj@163.com>"、license MIT、engines node>=22、files（lib、src、cordis.patch.yml）。
 - tsconfig.json：参照姐妹仓库（target ES2022、moduleResolution bundler、strict、types:["node"]、allowImportingTsExtensions 等）。
-- tsdown.config.ts：host 半区产出 lib/index.js（ESM、dts、neverBundle 全部 @deepseek-ai/* link 依赖）；如有浏览器半区，按姐妹仓库的闭包工厂配置（window.__ModuleLoader__.load）再产出 lib/client.js，平台 externals 与 dsh-schedule/dsh-hotkeys 一致。
+- tsdown.config.ts：host 半区产出 lib/index.js（ESM、dts、neverBundle 全部 @deepseek-ai/* link 依赖、fixedExtension: false——确保产出 index.js 而非 index.mjs，与 package.json 的 main/types 一致）；如有浏览器半区，按姐妹仓库的闭包工厂配置（window.__ModuleLoader__.load）再产出 lib/client.js，平台 externals 与 dsh-schedule/dsh-hotkeys 一致。
 - cordis.patch.yml：- insert: - id: ${name} / name: '@dsh-external/${name}' / config: {...}，并用中文注释说明每个配置项。
 - src/index.ts：export const name = '${name}'；export const inject = [所需服务]；export function apply(ctx, config)；如有配置用 @deepseek-ai/schemastery 的 z 定义 Config（z<Config> 模式见 @deepseek-ai/dsh-tool-subagent）。
 - 浏览器半区（仅当需求需要 UI）：src/client/index.ts + package.json 的 dsh.client（platform: web，inject @deepseek-ai/dsh-client-runtime）。
@@ -56,15 +61,13 @@ ${toPosix(stagingDir)}
 - 代码注释用中文；UX 文案按 AGENTS.md：用户引导文本不暴露实现细节，错误提示给建议 + 适量调试信息。
 
 ### 参考仓库（先通读再动手）
-- D:/2-OGP/dsh-schedule（全功能：host+browser、命令、定时、状态；用 read 工具读 src/ 与 tsdown.config.ts、package.json、cordis.patch.yml）
-- D:/2-OGP/dsh-hotkeys（host+browser 简洁示例）
-- D:/2-OGP/dsh-plugin/plugins/system-notify（最小 host 插件）
-- D:/2-OGP/dsh-plugin/plugins/command-opt（host 占位 + 纯 browser 插件示例）
-- API 查阅：${toPosix(harnessRoot)}/packages/<相关包>/src（如 core/tools 的 defineTool、core/agent、interaction/commands、subagent/subagent、settings/settings、client/*）
+
+${referenceList}
 
 ### 依赖链接约定
 deepseek-harness 检出位于 ${toPosix(harnessRoot)}。从交付目录到它的相对前缀已算好：${relativeHarnessPath}。
 所有 @deepseek-ai/* 依赖写成 "link:${relativeHarnessPath}/vendor/cordis"、"link:${relativeHarnessPath}/packages/core/tools" 这类形式（具体子路径按需，可参考姐妹仓库 package.json 的依赖清单）。
+禁止把 @deepseek-ai/* 写成 registry 版本号（如 "^1.0.0"）——宿主会在迁移时校验并拒绝。
 
 ### AGENTS.md 规则（必须遵守）
 - 小步修改、清晰实现、最小依赖；不擅自大改架构；不要引入没有必要的抽象。
@@ -93,7 +96,7 @@ deepseek-harness 检出位于 ${toPosix(harnessRoot)}。从交付目录到它的
 REPORT_START
 plugin_name: ${name}
 summary_zh: <一句话中文功能摘要>
-summary_en: <一句话英文摘要，≤80 字符，用于 Conventional Commit，如 "add keyword search for session memos">
+summary_en: <一句话英文摘要，只含可打印 ASCII、无换行，≤72 字符，用于 Conventional Commit，如 "add keyword search for session memos">
 requires_client: <true|false>
 build: <passed|failed>
 typecheck: <passed|failed|skipped>

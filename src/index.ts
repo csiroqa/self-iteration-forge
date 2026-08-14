@@ -45,6 +45,15 @@ export const Config: z<Config> = z.object({
   gitAuthorEmail: z.string().default('justinwangyj@163.com'),
   /** 成功后是否保留 staging 目录（便于排查）。 */
   keepStaging: z.boolean().default(true),
+  /** 子代理提示词中列出的参考仓库（姐妹插件，工具链/格式/风格对照）。 */
+  referenceRepos: z.array(z.string()).default([
+    'D:/2-OGP/dsh-schedule',
+    'D:/2-OGP/dsh-hotkeys',
+    'D:/2-OGP/dsh-plugin/plugins/system-notify',
+    'D:/2-OGP/dsh-plugin/plugins/command-opt',
+  ]),
+  /** staging 目录保留天数；超过则在下一次 forge 调用时清理；0 = 不清理（默认）。 */
+  stagingTtlDays: z.natural().default(0),
 })
 
 /** 直接 apply()（不经 loader）时也保证字段齐全。 */
@@ -60,6 +69,13 @@ const DEFAULTS: Config = {
   gitAuthorName: 'csiroqa',
   gitAuthorEmail: 'justinwangyj@163.com',
   keepStaging: true,
+  referenceRepos: [
+    'D:/2-OGP/dsh-schedule',
+    'D:/2-OGP/dsh-hotkeys',
+    'D:/2-OGP/dsh-plugin/plugins/system-notify',
+    'D:/2-OGP/dsh-plugin/plugins/command-opt',
+  ],
+  stagingTtlDays: 0,
 }
 
 export function apply(ctx: Context, config: Partial<Config> = {}): void {
@@ -99,7 +115,18 @@ export {
   slugFromRequirement,
   toPosix,
   assertOk,
+  cleanSummaryEn,
+  buildCommitSubject,
   type ExecResult,
 } from './utils.ts'
-export { parseChildReport, type ChildReport } from './forge.ts'
+export {
+  parseChildReport,
+  runForge,
+  cleanupStaleStaging,
+  assertNoRegistryHarnessDeps,
+  type ChildReport,
+  type ForgeArgs,
+  type ForgeToolResult,
+  type StartChild,
+} from './forge.ts'
 export { buildChildPrompt, type ChildPromptContext } from './prompt.ts'

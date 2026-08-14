@@ -2,15 +2,20 @@
  * plugin-forge —— forge_plugin 工具与 /forge status 命令。
  *
  * 编排流程（每一步失败都不静默吞掉，如实报错）：
- *   1. 清理并重建 staging 目录（父会话工作区内 /.forge-staging/<name>）；
- *   2. 启动全新子代理（spawn provider，maxChildDepth=2：子代理还能再向下委托一层，
- *      同时封顶防无限递归），在 staging 开发并构建验证插件；
- *   3. 子代理 completed 后，把 staging 复制为 targetRoot/<name> 独立仓库，
- *      改写 package.json 的 deepseek-harness link 路径、补齐 .gitignore；
- *   4. 在目标目录重新 pnpm install + pnpm build 验证迁移结果；
- *   5. git init（如无）→ git add -A → 检查 diff → 有变更则用英文 Conventional
+ *   1. （可选）清理 stagingRoot 下过期的旧 staging 目录；
+ *   2. 清理并重建本次 staging 目录（调用方工作区内 /.forge-staging/<name>）；
+ *   3. 启动全新子代理（spawn provider，maxChildDepth=2：子代理还能再向下委托
+ *      一层，同时封顶防无限递归），在 staging 开发并构建验证插件；
+ *   4. 子代理 completed 后，把 staging 复制为 targetRoot/<name> 独立仓库：
+ *      改写 deepseek-harness link 路径、补齐 .gitignore、校验没有写成
+ *      registry 版本号的 @deepseek-ai/* 依赖；
+ *   5. 在目标目录重新 pnpm install + pnpm build 验证迁移结果；
+ *   6. git init（如无）→ git add -A → 检查 diff → 有变更则用英文 Conventional
  *      Commit 提交一次（功能完成即提交，非定时；不 push/tag/release）；
- *   6. 登记进 $DSH_HOME/plugin-forge.json，供 /forge status 查询。
+ *   7. 登记进 $DSH_HOME/plugin-forge.json，供 /forge status 查询。
+ *
+ * 核心编排抽成 runForge()，子代理启动通过 startChild 注入——单元/集成测试
+ * 可以注入假子代理，完整跑通「staging → 迁移 → 构建验证 → 提交 → 登记」。
  */
 import type { Context } from '@deepseek-ai/cordis'
 // 类型侧引入 dsh-commands，激活其 Context 增强（ctx.commands）。
@@ -19,13 +24,14 @@ import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 import type { JsonValue } from '@deepseek-ai/dsh-session'
 import type { SubagentResult, SubagentRun } from '@deepseek-ai/dsh-subagent'
-import { mkdir, readdir, rm } from 'node:fs/promises'
+import { mkdir, readFile, readdir, rm, stat } from 'node:fs/promises'
 import path from 'node:path'
 import { commitStaged, ensureGitRepo, stageAll } from './git.ts'
 import { copyInto, ensureGitignore, pathExists, rewriteHarnessLinks } from './migrate.ts'
 import { buildChildPrompt } from './prompt.ts'
 import { loadRegistry, upsertRepo, type ForgeRepoEntry } from './registry.ts'
 import {
+  buildCommitSubject,
   findHarnessRoot,
   normalizePluginName,
   relativeLink,
@@ -38,7 +44,7 @@ import {
 export interface ForgeConfig {
   /** 独立仓库所在根目录（Windows 路径或正斜杠均可）。 */
   readonly targetRoot: string
-  /** staging 根目录；留空 = 父会话工作区/.forge-staging。 */
+  /** staging 根目录；留空 = 调用方工作区/.forge-staging。 */
   readonly stagingRoot: string
   /** deepseek-harness 检出根；留空 = 从工作区向上自动查找。 */
   readonly harnessRoot: string
@@ -58,12 +64,16 @@ export interface ForgeConfig {
   readonly gitAuthorEmail: string
   /** 成功后是否保留 staging 目录（默认 true，便于排查）。 */
   readonly keepStaging: boolean
+  /** 子代理提示词中列出的参考仓库（姐妹插件，用于工具链/格式/风格对照）。 */
+  readonly referenceRepos: string[]
+  /** staging 目录保留天数；超过则在下一次 forge 调用时清理；0 = 不清理。 */
+  readonly stagingTtlDays: number
 }
 
 const TOOL_NAME = 'forge_plugin'
 
 /** 子代理结果（stopReason + 全部文本）。 */
-interface ChildOutcome {
+export interface ChildOutcome {
   readonly stopReason: SubagentResult['stopReason']
   readonly text: string
 }
@@ -78,6 +88,39 @@ export interface ChildReport {
   files?: string
   notes?: string
 }
+
+/** forge_plugin 的调用参数（经 schema 校验后）。 */
+export interface ForgeArgs {
+  readonly requirement: string
+  readonly name?: string
+  readonly targetRoot?: string
+  readonly migrate?: boolean
+  readonly update?: boolean
+}
+
+/** runForge 的成功/失败结果（工具 output.schema 的结构化值）。 */
+export interface ForgeToolResult {
+  readonly ok: boolean
+  readonly pluginName: string
+  readonly migratedTo?: string
+  readonly committed: boolean
+  readonly commitSubject?: string
+  readonly build: string
+  readonly files: string[]
+  readonly childReport?: string
+  readonly error?: string
+}
+
+/** 子代理启动请求（runForge 注入点）。 */
+export interface StartChildRequest {
+  readonly label: string
+  readonly promptText: string
+  readonly signal: AbortSignal
+  readonly maxDepth: number
+}
+
+/** 子代理启动函数：真实路径包 ctx.subagents，测试注入假实现。 */
+export type StartChild = (request: StartChildRequest) => Promise<ChildOutcome>
 
 /** 收集子代理结果并在任何路径下释放 run（与 tool-subagent 的 settle 一致）。 */
 async function collectChild(run: SubagentRun): Promise<ChildOutcome> {
@@ -172,9 +215,220 @@ async function verifyBuildInTarget(target: string, config: ForgeConfig): Promise
   try {
     await runCommand('pnpm', ['install'], { cwd: target, timeoutMs: config.childTimeoutMs })
     await runCommand('pnpm', ['build'], { cwd: target, timeoutMs: config.childTimeoutMs })
+    // 构建"通过"不等于可安装：main/types 指向的文件必须真实存在
+    // （防子代理产出 index.mjs 却声明 main: lib/index.js 之类）。
+    const packageJsonPath = path.join(target, 'package.json')
+    if (await pathExists(packageJsonPath)) {
+      const pkg = JSON.parse(await readFile(packageJsonPath, 'utf8')) as {
+        main?: string
+        types?: string
+      }
+      const missing: string[] = []
+      for (const field of ['main', 'types'] as const) {
+        const value = pkg[field]
+        if (value !== undefined && typeof value === 'string') {
+          const resolved = path.resolve(target, value)
+          if (!(await pathExists(resolved))) missing.push(`${field}=${value}`)
+        }
+      }
+      if (missing.length > 0) {
+        return `failed: package.json 声明的 ${missing.join('、')} 不存在（构建产物与声明不一致）`
+      }
+    }
     return 'passed'
   } catch (error) {
     return `failed: ${error instanceof Error ? error.message : String(error)}`
+  }
+}
+
+/** 校验迁移后的 package.json 里没有写成 registry 版本号的 @deepseek-ai/* 依赖。 */
+export async function assertNoRegistryHarnessDeps(packageJsonPath: string, harnessRoot: string): Promise<void> {
+  const pkg = JSON.parse(await readFile(packageJsonPath, 'utf8')) as {
+    dependencies?: Record<string, string>
+    devDependencies?: Record<string, string>
+  }
+  const violations: string[] = []
+  for (const section of ['dependencies', 'devDependencies'] as const) {
+    const deps = pkg[section]
+    if (deps === undefined) continue
+    for (const [dep, spec] of Object.entries(deps)) {
+      if (dep.startsWith('@deepseek-ai/') && typeof spec === 'string' && !spec.startsWith('link:')) {
+        violations.push(`${dep}@${spec}`)
+      }
+    }
+  }
+  if (violations.length > 0) {
+    throw new Error(
+      `发现 registry 版本形式的 @deepseek-ai/* 依赖（必须 link: 指向 ${toPosix(harnessRoot)}）：${violations.join(', ')}`,
+    )
+  }
+}
+
+/** 清理 stagingRoot 下超过 ttlDays 天的旧 staging 目录；返回清理数量。 */
+export async function cleanupStaleStaging(stagingRoot: string, ttlDays: number): Promise<number> {
+  if (ttlDays <= 0) return 0
+  let entries
+  try {
+    entries = await readdir(stagingRoot, { withFileTypes: true })
+  } catch {
+    return 0
+  }
+  const cutoff = Date.now() - ttlDays * 86_400_000
+  let removed = 0
+  for (const entry of entries) {
+    if (!entry.isDirectory() || entry.name === '.pnpm-store') continue
+    const full = path.join(stagingRoot, entry.name)
+    try {
+      const meta = await stat(full)
+      if (meta.mtimeMs < cutoff) {
+        await rm(full, { recursive: true, force: true })
+        removed += 1
+      }
+    } catch {
+      // 单个目录清理失败不影响其余。
+    }
+  }
+  return removed
+}
+
+/** runForge 的输入（workspace 与 harnessRoot 由调用方解析，便于测试注入）。 */
+export interface RunForgeOptions {
+  readonly config: ForgeConfig
+  /** 调用方工作区（子代理沙箱可写范围，staging 位于其下）。 */
+  readonly workspace: string
+  readonly harnessRoot: string
+  readonly args: ForgeArgs
+  readonly signal: AbortSignal
+  readonly startChild: StartChild
+}
+
+/**
+ * forge 全流程编排（可测试核心）：
+ * staging → 子代理开发 → 迁移 → 依赖守卫 → 目标构建验证 → 提交 → 登记。
+ * 关键失败直接 throw（由工具注册表转为 isError 结果）。
+ */
+export async function runForge(options: RunForgeOptions): Promise<ForgeToolResult> {
+  const { config, workspace, harnessRoot, args, signal, startChild } = options
+  const requirement = String(args.requirement ?? '')
+  if (requirement.trim() === '') throw new Error('requirement 不能为空')
+  const name = normalizePluginName(args.name, slugFromRequirement(requirement))
+  const targetRoot = args.targetRoot !== undefined && args.targetRoot.trim() !== ''
+    ? path.resolve(args.targetRoot)
+    : path.resolve(config.targetRoot)
+  const migrate = args.migrate !== false
+  const update = args.update === true
+
+  const stagingRoot = config.stagingRoot.trim() !== ''
+    ? path.resolve(config.stagingRoot)
+    : path.join(workspace, '.forge-staging')
+  const staging = path.join(stagingRoot, name)
+  const target = path.join(targetRoot, name)
+
+  // 0. 顺带清理过期的旧 staging（配置开启时）。
+  await cleanupStaleStaging(stagingRoot, config.stagingTtlDays)
+
+  // 1. 目标存在性检查（防止误覆盖）。
+  const targetExists = await pathExists(target)
+  if (migrate && targetExists && !update) {
+    throw new Error(`目标目录已存在：${toPosix(target)}。请换一个 name，或设置 update=true 明确更新。`)
+  }
+
+  // 2. 清理并重建 staging。
+  await rm(staging, { recursive: true, force: true })
+  await mkdir(staging, { recursive: true })
+
+  // 3. 启动子代理开发。
+  const promptText = buildChildPrompt({
+    requirement,
+    name,
+    stagingDir: staging,
+    harnessRoot,
+    relativeHarnessPath: relativeLink(staging, harnessRoot),
+    targetRoot,
+    referenceRepos: config.referenceRepos,
+  })
+  const child = await startChild({
+    label: `forge plugin: ${name}`,
+    promptText,
+    signal,
+    maxDepth: config.maxChildDepth,
+  })
+  if (child.stopReason !== 'completed') {
+    throw new Error(
+      `子代理未正常完成（${child.stopReason}）。staging 保留在 ${toPosix(staging)}。`
+      + (child.text.trim() === '' ? '' : `\n部分输出：\n${child.text.slice(0, 4000)}`),
+    )
+  }
+  const report = parseChildReport(child.text)
+
+  // 4. 文件清单。
+  const files = await listRelativeFiles(staging)
+  if (files.length === 0) {
+    throw new Error(`子代理未在 staging 产出任何文件：${toPosix(staging)}`)
+  }
+
+  // 5. 迁移 + 目标验证 + 提交。
+  let migratedTo: string | undefined
+  let committed = false
+  let commitSubject: string | undefined
+  let build = 'skipped'
+  if (migrate) {
+    migratedTo = target
+    await copyInto(staging, migratedTo)
+    const packageJson = path.join(migratedTo, 'package.json')
+    if (await pathExists(packageJson)) {
+      await rewriteHarnessLinks(packageJson, staging, migratedTo, harnessRoot)
+      await assertNoRegistryHarnessDeps(packageJson, harnessRoot)
+    }
+    await ensureGitignore(migratedTo)
+    build = await verifyBuildInTarget(migratedTo, config)
+    if (build !== 'passed') {
+      throw new Error(
+        `迁移后构建验证失败：${build}\nstaging 保留在 ${toPosix(staging)}，目标目录为 ${toPosix(migratedTo)}。`
+        + ' 请检查 link 路径改写或依赖；修复后可对目标目录重试 pnpm install && pnpm build。',
+      )
+    }
+    // 功能完成 → 立即提交（非定时）；提交前 stageAll 已检查 diff。
+    await ensureGitRepo(migratedTo)
+    const hasChanges = await stageAll(migratedTo)
+    if (hasChanges) {
+      commitSubject = buildCommitSubject(config.commitType, name, report?.summaryEn)
+      await commitStaged(migratedTo, commitSubject, {
+        name: config.gitAuthorName,
+        email: config.gitAuthorEmail,
+      })
+      committed = true
+    }
+    const migratedPath = toPosix(migratedTo)
+    const previous = (await loadRegistry()).repos.find((repo) => repo.path === migratedPath)
+    const entry: ForgeRepoEntry = {
+      name,
+      path: migratedPath,
+      createdAt: previous?.createdAt ?? new Date().toISOString(),
+      lastCommitAt: committed ? new Date().toISOString() : previous?.lastCommitAt,
+      commitCount: (previous?.commitCount ?? 0) + (committed ? 1 : 0),
+    }
+    await upsertRepo(entry)
+    // push 默认关闭（AGENTS.md：不自动 push）；仅在配置显式开启时执行。
+    if (committed && config.push) {
+      await runCommand('git', ['push'], { cwd: migratedTo, timeoutMs: config.childTimeoutMs })
+    }
+  }
+
+  // 6. 收尾：保留 staging（默认）供排查。
+  if (!config.keepStaging) {
+    await rm(staging, { recursive: true, force: true })
+  }
+
+  return {
+    ok: true,
+    pluginName: name,
+    migratedTo: migratedTo === undefined ? undefined : toPosix(migratedTo),
+    committed,
+    commitSubject,
+    build,
+    files,
+    childReport: report === undefined ? child.text.slice(0, 2000) : report.notes ?? '',
   }
 }
 
@@ -232,137 +486,31 @@ export function registerForgeTool(ctx: Context, config: ForgeConfig): () => void
       if (parent === undefined) {
         throw new Error(`${TOOL_NAME} 需要调用方 agent（exec.agent 缺失）`)
       }
-      const requirement = String(args.requirement ?? '')
-      if (requirement.trim() === '') throw new Error('requirement 不能为空')
-      const name = normalizePluginName(args.name, slugFromRequirement(requirement))
-      const targetRoot = typeof args.targetRoot === 'string' && args.targetRoot.trim() !== ''
-        ? path.resolve(args.targetRoot)
-        : path.resolve(config.targetRoot)
-      const migrate = args.migrate !== false
-      const update = args.update === true
-
       // 工作区 = 父会话 cwd；staging 放在工作区内（子代理沙箱可写）。
       const sessionCwd = parent.session.header.cwd
       const workspace = sessionCwd !== undefined && sessionCwd.trim() !== ''
         ? path.resolve(sessionCwd)
         : process.cwd()
-      const stagingRoot = config.stagingRoot.trim() !== ''
-        ? path.resolve(config.stagingRoot)
-        : path.join(workspace, '.forge-staging')
-      const staging = path.join(stagingRoot, name)
       const harnessRoot = config.harnessRoot.trim() !== ''
         ? path.resolve(config.harnessRoot)
         : await findHarnessRoot(workspace)
-      const target = path.join(targetRoot, name)
 
-      // 1. 目标存在性检查（防止误覆盖）。
-      const targetExists = await pathExists(target)
-      if (migrate && targetExists && !update) {
-        throw new Error(`目标目录已存在：${toPosix(target)}。请换一个 name，或设置 update=true 明确更新。`)
-      }
-
-      // 2. 清理并重建 staging。
-      await rm(staging, { recursive: true, force: true })
-      await mkdir(staging, { recursive: true })
-
-      // 3. 启动子代理开发。
-      const provider = ctx.subagents.getProvider(config.subagentProvider)
-      if (provider === undefined) {
-        throw new Error(`subagent provider "${config.subagentProvider}" 未注册（base bundle 应内置 spawn）`)
-      }
-      const promptText = buildChildPrompt({
-        requirement,
-        name,
-        stagingDir: staging,
-        harnessRoot,
-        relativeHarnessPath: relativeLink(staging, harnessRoot),
-        targetRoot,
-      })
-      const run: SubagentRun = await ctx.subagents.start(config.subagentProvider, {
-        label: `forge plugin: ${name}`,
-        prompt: [{ type: 'text', text: promptText }],
-        parent,
-        signal: exec.signal,
-        maxDepth: config.maxChildDepth,
-      })
-      const child = await collectChild(run)
-      if (child.stopReason !== 'completed') {
-        throw new Error(
-          `子代理未正常完成（${child.stopReason}）。staging 保留在 ${toPosix(staging)}。`
-          + (child.text.trim() === '' ? '' : `\n部分输出：\n${child.text.slice(0, 4000)}`),
-        )
-      }
-      const report = parseChildReport(child.text)
-
-      // 4. 文件清单。
-      const files = await listRelativeFiles(staging)
-      if (files.length === 0) {
-        throw new Error(`子代理未在 staging 产出任何文件：${toPosix(staging)}`)
-      }
-
-      // 5. 迁移 + 目标验证 + 提交。
-      let migratedTo: string | undefined
-      let committed = false
-      let commitSubject: string | undefined
-      let build = 'skipped'
-      if (migrate) {
-        migratedTo = target
-        await copyInto(staging, migratedTo)
-        const packageJson = path.join(migratedTo, 'package.json')
-        if (await pathExists(packageJson)) {
-          await rewriteHarnessLinks(packageJson, staging, migratedTo, harnessRoot)
+      const startChild: StartChild = async (request) => {
+        const provider = ctx.subagents.getProvider(config.subagentProvider)
+        if (provider === undefined) {
+          throw new Error(`subagent provider "${config.subagentProvider}" 未注册（base bundle 应内置 spawn）`)
         }
-        await ensureGitignore(migratedTo)
-        build = await verifyBuildInTarget(migratedTo, config)
-        if (build !== 'passed') {
-          throw new Error(
-            `迁移后构建验证失败：${build}\nstaging 保留在 ${toPosix(staging)}，目标目录为 ${toPosix(migratedTo)}。`
-            + ' 请检查 link 路径改写或依赖；修复后可对目标目录重试 pnpm install && pnpm build。',
-          )
-        }
-        // 功能完成 → 立即提交（非定时）；提交前 stageAll 已检查 diff。
-        await ensureGitRepo(migratedTo)
-        const hasChanges = await stageAll(migratedTo)
-        if (hasChanges) {
-          const summaryEn = report?.summaryEn?.trim() ?? ''
-          commitSubject = `${config.commitType}: ${name}${summaryEn === '' ? '' : `: ${summaryEn}`}`
-          await commitStaged(migratedTo, commitSubject, {
-            name: config.gitAuthorName,
-            email: config.gitAuthorEmail,
-          })
-          committed = true
-        }
-        const migratedPath = toPosix(migratedTo)
-        const previous = (await loadRegistry()).repos.find((repo) => repo.path === migratedPath)
-        const entry: ForgeRepoEntry = {
-          name,
-          path: migratedPath,
-          createdAt: previous?.createdAt ?? new Date().toISOString(),
-          lastCommitAt: committed ? new Date().toISOString() : previous?.lastCommitAt,
-          commitCount: (previous?.commitCount ?? 0) + (committed ? 1 : 0),
-        }
-        await upsertRepo(entry)
-        // push 默认关闭（AGENTS.md：不自动 push）；仅在配置显式开启时执行。
-        if (committed && config.push) {
-          await runCommand('git', ['push'], { cwd: migratedTo, timeoutMs: config.childTimeoutMs })
-        }
+        const run: SubagentRun = await ctx.subagents.start(config.subagentProvider, {
+          label: request.label,
+          prompt: [{ type: 'text', text: request.promptText }],
+          parent,
+          signal: request.signal,
+          maxDepth: request.maxDepth,
+        })
+        return collectChild(run)
       }
 
-      // 6. 收尾：保留 staging（默认）供排查。
-      if (!config.keepStaging) {
-        await rm(staging, { recursive: true, force: true })
-      }
-
-      return {
-        ok: true,
-        pluginName: name,
-        migratedTo: migratedTo === undefined ? undefined : toPosix(migratedTo),
-        committed,
-        commitSubject,
-        build,
-        files,
-        childReport: report === undefined ? child.text.slice(0, 2000) : report.notes ?? '',
-      }
+      return runForge({ config, workspace, harnessRoot, args, signal: exec.signal, startChild })
     },
   }))
 }
@@ -371,18 +519,31 @@ export function registerForgeTool(ctx: Context, config: ForgeConfig): () => void
 export function registerForgeCommand(ctx: Context): () => void {
   return ctx.commands.register({
     name: 'forge',
-    description: '查看 plugin-forge 已创建的插件仓库（路径 / 最近提交 / 提交次数）',
+    description: '查看 plugin-forge 已创建的插件仓库（路径 / HEAD / 工作区状态 / 最近提交）',
     handler: async () => {
       const registry = await loadRegistry()
       if (registry.repos.length === 0) {
         return { kind: 'success' as const, text: 'plugin-forge 尚未创建任何插件仓库。' }
       }
-      const lines = registry.repos.map((repo) => {
+      const lines: string[] = []
+      for (const repo of registry.repos) {
+        const exists = await pathExists(repo.path)
         const when = repo.lastCommitAt === undefined
           ? '（尚无提交）'
           : new Date(repo.lastCommitAt).toLocaleString('zh-CN')
-        return `- ${repo.name}（${repo.path}）\n  最近提交：${when}，共 ${repo.commitCount} 次`
-      })
+        let head = '无 HEAD'
+        let cleanliness = '—'
+        if (exists) {
+          const log = await runCommand('git', ['log', '-1', '--format=%h %s'], { cwd: repo.path })
+          if (log.code === 0 && log.stdout.trim() !== '') head = log.stdout.trim()
+          const status = await runCommand('git', ['status', '--porcelain'], { cwd: repo.path })
+          cleanliness = status.code === 0 && status.stdout.trim() === '' ? '干净' : '有未提交改动'
+        }
+        lines.push(
+          `- ${repo.name}（${repo.path}）\n  HEAD：${head}；工作区：${exists ? cleanliness : '目录不存在'}；`
+          + `最近提交：${when}，累计 ${repo.commitCount} 次`,
+        )
+      }
       return {
         kind: 'success' as const,
         text: `plugin-forge 已创建的插件仓库（${registry.repos.length} 个）：\n${lines.join('\n')}`,
