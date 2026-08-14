@@ -117,6 +117,18 @@ dsh plugin --profile web add link:D:\2-OGP\plugin-forge   # Windows
 2. 侧栏输入 `/forge status` 查看已创建的插件仓库与最近提交
 3. 生成的插件在 `D:/2-OGP/<name>`，可像其他姐妹插件一样 `dsh plugin --profile web add link:D:/2-OGP/<name>` 装入使用
 
+## 真实 LLM 实例测试（无需重启 GUI）
+
+在 GUI 重启加载 `forge_plugin` 之前，可用 `scripts/llm-e2e-host.mjs` 用**真实 LLM 子代理**走完整条流水线（子代理 = 会话级 subagent，宿主侧 = 本脚本复用 lib 同一批函数）：
+
+```sh
+# 1) 生成真实子代理提示词（<name> <stagingDir> <targetRoot> <harnessRoot> <requirement>）
+node scripts/llm-e2e-host.mjs prompt demo-greet "D:\2-OGP\dsh-plugin\.forge-staging\demo-greet" "D:/2-OGP" "D:/2-OGP/deepseek-harness" "注册 /greet 命令……"
+# 2) 把提示词交给一个真实 LLM 子代理执行（staging 目录内开发 + 构建验证）
+# 3) 子代理完成后执行宿主侧全流程（迁移/link+CI 改写/构建/git 提交/登记）
+node scripts/llm-e2e-host.mjs run demo-greet "D:\2-OGP\dsh-plugin\.forge-staging\demo-greet" "D:/2-OGP" "D:/2-OGP/deepseek-harness" "feat: demo-greet: ……"
+```
+
 ## 设计意图：agent 自迭代
 
 这是 DSH 内 agent「自迭代」闭环的起点：agent 通过 `forge_plugin` 按需生成/更新插件来扩展 DSH 自身能力，每个功能的完成都形成一次可回退的提交。深度限制（`maxChildDepth=2`）与「功能完成即提交」共同保证迭代可控、可审查。
