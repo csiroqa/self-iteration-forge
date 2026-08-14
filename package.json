@@ -1,0 +1,65 @@
+{
+  "name": "@dsh-external/plugin-forge",
+  "version": "0.1.0",
+  "description": "DSH 插件锻造厂：为 AI 提供 forge_plugin 工具，按需求启动新 Agent 开发 DSH 插件、构建验证、迁移为 D:/2-OGP 下独立 git 仓库并在功能完成后自动提交（非定时），登记于 $DSH_HOME/plugin-forge.json",
+  "private": true,
+  "type": "module",
+  "main": "lib/index.js",
+  "types": "lib/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "scripts": {
+    "build": "tsdown",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "watch": "tsdown --watch"
+  },
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "cordis",
+    "forge",
+    "plugin-generator",
+    "subagent",
+    "self-iteration"
+  ],
+  "author": "csiroqa <justinwangyj@163.com>",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22"
+  },
+  "packageManager": "pnpm@11.7.0",
+  "dependencies": {
+    "@deepseek-ai/cordis": "link:../deepseek-harness/vendor/cordis",
+    "@deepseek-ai/dsh-agent": "link:../deepseek-harness/packages/core/agent",
+    "@deepseek-ai/dsh-commands": "link:../deepseek-harness/packages/interaction/commands",
+    "@deepseek-ai/dsh-llm": "link:../deepseek-harness/packages/llm/llm",
+    "@deepseek-ai/dsh-session": "link:../deepseek-harness/packages/core/session",
+    "@deepseek-ai/dsh-subagent": "link:../deepseek-harness/packages/subagent/subagent",
+    "@deepseek-ai/dsh-tools": "link:../deepseek-harness/packages/core/tools",
+    "@deepseek-ai/schemastery": "link:../deepseek-harness/vendor/schemastery"
+  },
+  "devDependencies": {
+    "@types/node": "^24.13.3",
+    "tsdown": "^0.22.14",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.10"
+  },
+  "files": [
+    "lib/index.js",
+    "lib/index.d.ts",
+    "src",
+    "cordis.patch.yml"
+  ]
+}

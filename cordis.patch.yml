@@ -1,0 +1,37 @@
+# @dsh-external/plugin-forge bundle patch: inserts its plugin row into the
+# profile roster. Install with:
+#   dsh plugin --profile web add link:<this-directory>
+#
+# 该行只挂载 host 半区（forge_plugin 工具 + /forge status 命令，无浏览器 UI）。
+#
+# config 详解（全部可选，默认值内置在代码 src/index.ts 的 DEFAULTS）：
+#   targetRoot        独立仓库所在根目录（默认 D:/2-OGP）；forge_plugin 的
+#                     targetRoot 参数可临时覆盖
+#   stagingRoot       子代理开发暂存根目录；留空 = 调用方会话工作区/.forge-staging
+#   harnessRoot       deepseek-harness 检出根；留空 = 从工作区向上自动查找
+#   subagentProvider  子代理 provider 名（默认 spawn，base bundle 内置）
+#   maxChildDepth     子代理最大委托深度（默认 2：可再向下委托一层，封顶防递归）
+#   childTimeoutMs    子代理及目标目录构建超时（毫秒，默认 2700000 = 45 分钟）
+#   commitType        Conventional Commit 类型（默认 feat）
+#   push              是否提交后 push（默认 false；遵守 AGENTS.md 不自动 push）
+#   gitAuthorName     仓库未配置 git 身份时的作者名（默认 csiroqa）
+#   gitAuthorEmail    仓库未配置 git 身份时的作者邮箱（默认 justinwangyj@163.com）
+#   keepStaging       成功后是否保留 staging 目录（默认 true，便于排查）
+#
+# 提交语义：功能完成即提交（每次 forge 完成插件的创建/更新并迁移后，做一次
+# 英文 Conventional Commit），不是定时提交。
+- insert:
+    - id: plugin-forge
+      name: '@dsh-external/plugin-forge'
+      config:
+        targetRoot: 'D:/2-OGP'
+        stagingRoot: ''
+        harnessRoot: ''
+        subagentProvider: spawn
+        maxChildDepth: 2
+        childTimeoutMs: 2700000
+        commitType: feat
+        push: false
+        gitAuthorName: csiroqa
+        gitAuthorEmail: justinwangyj@163.com
+        keepStaging: true
