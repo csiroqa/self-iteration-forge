@@ -113,4 +113,6 @@ node scripts/llm-e2e-host.mjs run <name> <stagingDir> <targetRoot> <harnessRoot>
 
 ## Demo
 
-[docs/demo-1.png](docs/demo-1.png) · [docs/demo-2.png](docs/demo-2.png)
+![demo-1](docs/demo-1.png)
+
+![demo-2](docs/demo-2.png)
