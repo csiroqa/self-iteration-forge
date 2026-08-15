@@ -2,7 +2,8 @@
  * 加载冒烟：构建通过不等于能加载。用真实 cordis Context + 复刻
  * dsh-commands/dsh-tools 加载校验的假服务执行插件 apply，拦截 apply 期
  * 错误（命令 input.hint 为空等，真实事故：session-notes 导致启动崩溃）。
- * 仅覆盖 inject ⊆ {commands, tools} 的插件；其他跳过（由构建检查补充）。
+ * commands/tools 用精确复刻校验；其余注入服务提供宽容占位（调用/访问
+ * 不抛错），apply 照常执行——崩溃仍被拦截，不因服务不可复刻而跳过。
  *
  * 校验规则为 dsh-commands 的复刻（对照锚点：deepseek-harness
  * packages/interaction/commands/src/index.ts 的 normalizeDefinition，
@@ -73,7 +74,25 @@ function assertNoBuiltinConflict(def: unknown): void {
   }
 }
 
-/** 加载冒烟结果（skipped 视为 ok，由构建检查补充）。 */
+/**
+ * 宽容占位服务：方法调用与属性访问均不抛错。
+ * 用于无法精确复刻的注入服务（subagents/webServer/timer/…）——
+ * 让 apply 照常执行以便捕捉崩溃。保守策略：apply 期即深度依赖
+ * 服务返回值结构的插件会被拦截（真实环境下同样脆弱），提示后由
+ * 子代理修复或人工复核，好过交付后启动崩溃。
+ */
+function lenientService(): unknown {
+  return new Proxy(() => undefined, {
+    get: (_target, prop) => {
+      if (prop === 'then') return undefined // 不当作 thenable：await 直接得到 undefined
+      if (prop === Symbol.toPrimitive) return () => 0
+      return lenientService()
+    },
+    apply: () => undefined,
+  })
+}
+
+/** 加载冒烟结果（lib 缺失等构建层场景视为 skipped/ok）。 */
 export interface VerifyLoadResult {
   readonly ok: boolean
   readonly detail?: string
@@ -89,13 +108,9 @@ export async function verifyPluginLoad(dir: string): Promise<VerifyLoadResult> {
     }
     return { ok: false, detail: `模块加载失败：${detail ?? '未知错误'}` }
   }
-  // 只覆盖 inject ⊆ {commands, tools} 的插件；其他服务无法精确复刻，跳过。
+  // commands/tools 精确复刻校验；其余注入服务提供宽容占位，
+  // apply 照常执行，apply 期崩溃对所有 inject 组合都能拦截。
   const injectNames = normalizeInject(mod.inject)
-  const unmockable = (injectNames ?? []).filter((name) => !MOCKABLE_SERVICES.has(name))
-  if (unmockable.length > 0) {
-    return { ok: true, detail: `skipped: 注入服务无法复刻（${unmockable.join(', ')}）` }
-  }
-
   const ctx = new Context()
   ctx.provide('commands', {
     register: (def: unknown) => {
@@ -110,6 +125,9 @@ export async function verifyPluginLoad(dir: string): Promise<VerifyLoadResult> {
       return () => {}
     },
   })
+  for (const name of injectNames ?? []) {
+    if (!MOCKABLE_SERVICES.has(name)) ctx.provide(name, lenientService())
+  }
 
   let fiber: Fiber | undefined
   try {

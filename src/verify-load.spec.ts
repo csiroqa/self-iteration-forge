@@ -151,14 +151,37 @@ describe('verifyPluginLoad（加载冒烟）', () => {
     expect(result.ok).toBe(true)
   })
 
-  it('注入无法复刻的服务时跳过（skipped 视为通过）', async () => {
+  it('注入不可复刻的服务时提供宽容占位，合法 apply 通过', async () => {
     const libDir = await writePlugin(tempRoot, {
-      inject: ['subagents'],
+      inject: ['subagents', 'webServer'],
       body: '  void ctx',
     })
     const result = await verifyPluginLoad(path.dirname(libDir))
     expect(result.ok).toBe(true)
-    expect(result.detail).toContain('skipped')
+  })
+
+  it('注入不可复刻的服务时 apply 崩溃仍被拦截（不再跳过）', async () => {
+    const libDir = await writePlugin(tempRoot, {
+      inject: ['subagents'],
+      body: '  throw new Error("apply 阶段爆炸")',
+    })
+    const result = await verifyPluginLoad(path.dirname(libDir))
+    expect(result.ok).toBe(false)
+    expect(result.detail).toContain('apply 期错误')
+    expect(result.detail).toContain('apply 阶段爆炸')
+  })
+
+  it('宽容占位下调用注入服务方法不抛错，apply 正常完成', async () => {
+    const libDir = await writePlugin(tempRoot, {
+      inject: ['subagents'],
+      body: [
+        '  const provider = ctx.subagents.getProvider("spawn")',
+        '  ctx.subagents.start("spawn", { label: "x", prompt: [] })',
+        '  void provider',
+      ].join('\n'),
+    })
+    const result = await verifyPluginLoad(path.dirname(libDir))
+    expect(result.ok).toBe(true)
   })
 
   it('apply 抛错被捕获并返回结构化详情', async () => {
