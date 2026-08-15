@@ -91,7 +91,7 @@ if (mode === 'run') {
   const packageJson = path.join(target, 'package.json')
   if (await pathExists(packageJson)) {
     console.log('[2/6] 改写 link 路径 + CI 路径 + 依赖守卫')
-    const changed = await rewriteHarnessLinks(packageJson, staging, target, harness)
+    const changed = await rewriteHarnessLinks(packageJson, target, harness)
     console.log(`      改写 link: ${changed} 处`)
     await assertNoRegistryHarnessDeps(packageJson, harness)
   }

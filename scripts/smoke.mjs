@@ -78,7 +78,7 @@ try {
       '@deepseek-ai/cordis': `link:${relativeLink(staging, path.join(harness, 'vendor/cordis'))}`,
     },
   }))
-  const changed = await rewriteHarnessLinks(pkgPath, staging, target, harness)
+  const changed = await rewriteHarnessLinks(pkgPath, target, harness)
   check('rewriteHarnessLinks', changed === 1)
   const rewritten = JSON.parse(await readFile(pkgPath, 'utf8'))
   check(
@@ -106,6 +106,7 @@ try {
   await writeFile(path.join(syncTarget, 'node_modules', 'dep.js'), 'dep')
   const removed = await syncRemoveStale(syncSrc, syncTarget)
   check('syncRemoveStale 删除过期文件', removed === 1)
+  // stale.txt 是 target 独有文件，应已被删除（stat 抛错即通过）。
   let staleGone = true
   try {
     await import('node:fs/promises').then(({ stat }) => stat(path.join(syncTarget, 'stale.txt')))
@@ -113,7 +114,15 @@ try {
   } catch {
     // 已删除。
   }
-  check('syncRemoveStale 保护 node_modules', staleGone)
+  check('syncRemoveStale 删除过期 stale.txt', staleGone)
+  // node_modules 受保护：dep.js 应仍然存在（直接断言，不靠 removed 计数间接推断）。
+  let depProtected = true
+  try {
+    await import('node:fs/promises').then(({ stat }) => stat(path.join(syncTarget, 'node_modules', 'dep.js')))
+  } catch {
+    depProtected = false
+  }
+  check('syncRemoveStale 保护 node_modules', depProtected)
 
   // git 链路：init → add → commit → 无改动不再提交。
   await ensureGitRepo(repo)

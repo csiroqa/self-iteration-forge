@@ -14,7 +14,7 @@ import { mkdir, readFile, readdir, rm, stat } from 'node:fs/promises'
 import path from 'node:path'
 import { commitStaged, ensureGitRepo, stageAll } from './git.ts'
 import { mountPlugin } from './hotmount.ts'
-import { copyInto, ensureGitignore, pathExists, rewriteCiHarnessPaths, rewriteHarnessLinks, syncRemoveStale } from './migrate.ts'
+import { copyInto, ensureGitignore, EXCLUDED_BASENAMES, pathExists, rewriteCiHarnessPaths, rewriteHarnessLinks, syncRemoveStale } from './migrate.ts'
 import { verifyPluginLoad } from './verify-load.ts'
 import { buildChildPrompt } from './prompt.ts'
 import { loadRegistry, upsertRepo, type ForgeRepoEntry } from './registry.ts'
@@ -27,6 +27,7 @@ import {
   samePath,
   slugFromRequirement,
   toPosix,
+  truncateTail,
 } from './utils.ts'
 
 /** 插件配置（index.ts 的 z schema 与之对应；默认值见 index.ts）。 */
@@ -67,13 +68,22 @@ export interface ForgeConfig {
 /** 自迭代引导 section 的渲染顺序（紧随 tool-subagent 的 116.5 之后）。 */
 export const SELF_ITERATION_SECTION_ORDER = 117
 
+/** 输出文本截断长度（工具返回值/日志中携带的子代理文本尾部）。 */
+export const TEXT_TAIL = 500
+
+/** 子代理未正常完成时携带的部分输出长度。 */
+export const CHILD_TEXT_TAIL = 1500
+
+/** 每天毫秒数（staging TTL 清理用）。 */
+const MS_PER_DAY = 86_400_000
+
 /** 自迭代引导节（systemPrompt section，随每次提示词组装渲染）。 */
 export function selfIterationSectionText(): string {
   return [
     '你是 DSH 的自迭代智能体：能力不足时用 `forge_plugin` 生成插件补齐。',
     '执行任务时若缺少所需工具、只能手工重复处理、或发现可跨会话复用的功能，应调用 `forge_plugin` 生成插件。',
     '生成后自动热挂载。重复需求使用 update=true 迭代，子代理自动检测重复。',
-  ].join('')
+  ].join('\n')
 }
 
 const TOOL_NAME = 'forge_plugin'
@@ -93,15 +103,14 @@ export interface ChildOutcome {
   readonly text: string
 }
 
-/** 从 REPORT 块解析出的关键字段。 */
+/** 从 REPORT 块解析出的关键字段（与 prompt.ts 的 REPORT 协议逐项对应）。 */
 export interface ChildReport {
   summaryZh?: string
   summaryEn?: string
-  build?: string
-  typecheck?: string
-  test?: string
   files?: string
   notes?: string
+  /** 是否需要浏览器半区（prompt 协议 requires_client 字段）。 */
+  requiresClient?: boolean
   /** 子代理检测到需求与已有插件重复时，填已有插件名（此时不开发）。 */
   duplicateOf?: string
   /** 重复检测说明（重叠点/差异）。 */
@@ -177,7 +186,7 @@ async function collectChild(run: SubagentRun): Promise<ChildOutcome> {
   return { stopReason: result.stopReason, text }
 }
 
-/** 解析子代理报告中的 REPORT_START/REPORT_END 块。 */
+/** 解析子代理报告中的 REPORT_START/REPORT_END 块（与 prompt.ts 的协议字段对应）。 */
 export function parseChildReport(text: string): ChildReport | undefined {
   const match = /REPORT_START([\s\S]*?)REPORT_END/.exec(text)
   if (match === null || match[1] === undefined) return undefined
@@ -189,11 +198,9 @@ export function parseChildReport(text: string): ChildReport | undefined {
     const value = line.slice(sep + 1).trim()
     if (key === 'summary_zh') report.summaryZh = value
     else if (key === 'summary_en') report.summaryEn = value
-    else if (key === 'build') report.build = value
-    else if (key === 'typecheck') report.typecheck = value
-    else if (key === 'test') report.test = value
     else if (key === 'files') report.files = value
     else if (key === 'notes') report.notes = value
+    else if (key === 'requires_client') report.requiresClient = value.trim().toLowerCase() === 'true'
     else if (key === 'duplicate_of') report.duplicateOf = value
     else if (key === 'duplicate_note') report.duplicateNote = value
   }
@@ -206,7 +213,7 @@ async function listRelativeFiles(root: string): Promise<string[]> {
   const walk = async (dir: string): Promise<void> => {
     const entries = await readdir(dir, { withFileTypes: true })
     for (const entry of entries) {
-      if (entry.name === 'node_modules' || entry.name === '.git' || entry.name === '.pnpm-store') continue
+      if (EXCLUDED_BASENAMES.has(entry.name)) continue
       const full = path.join(dir, entry.name)
       if (entry.isDirectory()) await walk(full)
       else files.push(toPosix(path.relative(root, full)))
@@ -225,29 +232,15 @@ function withoutUndefined<T extends object>(value: T): T {
   return out as T
 }
 
-/** 把工具返回的 value 渲染成模型可见文本。 */
+/** 把工具返回的 value 渲染成模型可见文本（字段集合与 ForgeToolResult 一致）。 */
 function renderResult(value: JsonValue): string {
-  const result = value as {
-    ok?: boolean
-    pluginName?: string
-    migratedTo?: string
-    committed?: boolean
-    commitSubject?: string
-    build?: string
-    childReport?: string
-    error?: string
-    installed?: boolean
-    hotMounted?: boolean
-    hotDetail?: string
-    duplicated?: boolean
-    existingName?: string
-  }
+  const result = value as Partial<ForgeToolResult>
   const lines: string[] = []
   if (result.duplicated === true) {
     lines.push(`需求与已有插件「${result.existingName ?? '?'}」重复，未新建。用 update=true 迭代，或调整需求。`)
     const note = result.childReport
     if (note !== undefined && note.trim() !== '') {
-      lines.push(`检测说明：${note.trim().slice(0, 500)}`)
+      lines.push(`检测说明：${truncateTail(note.trim(), TEXT_TAIL)}`)
     }
     return lines.join('\n')
   }
@@ -264,7 +257,7 @@ function renderResult(value: JsonValue): string {
     }
     const report = result.childReport
     if (report !== undefined && report.trim() !== '') {
-      lines.push(`\n子代理汇报：\n${report.trim().slice(0, 500)}`)
+      lines.push(`\n子代理汇报：\n${truncateTail(report.trim(), TEXT_TAIL)}`)
     }
   } else {
     lines.push(`插件生成失败：${result.error ?? '未知错误'}`)
@@ -274,10 +267,14 @@ function renderResult(value: JsonValue): string {
 }
 
 /** 在目标目录重新安装并构建，验证迁移结果；返回 'passed' 或失败原因。 */
-export async function verifyBuildInTarget(target: string, config: ForgeConfig): Promise<string> {
+export async function verifyBuildInTarget(
+  target: string,
+  config: ForgeConfig,
+  signal?: AbortSignal,
+): Promise<string> {
   try {
-    await runCommand('pnpm', ['install'], { cwd: target, timeoutMs: config.childTimeoutMs })
-    await runCommand('pnpm', ['build'], { cwd: target, timeoutMs: config.childTimeoutMs })
+    await runCommand('pnpm', ['install'], { cwd: target, timeoutMs: config.childTimeoutMs, signal })
+    await runCommand('pnpm', ['build'], { cwd: target, timeoutMs: config.childTimeoutMs, signal })
     // 构建"通过"不等于可安装：main/types 指向的文件必须真实存在
     // （防子代理产出 index.mjs 却声明 main: lib/index.js 之类）。
     const packageJsonPath = path.join(target, 'package.json')
@@ -327,8 +324,15 @@ export async function assertNoRegistryHarnessDeps(packageJsonPath: string, harne
   }
 }
 
-/** 清理 stagingRoot 下超过 ttlDays 天的旧 staging 目录；返回清理数量。 */
-export async function cleanupStaleStaging(stagingRoot: string, ttlDays: number): Promise<number> {
+/**
+ * 清理 stagingRoot 下超过 ttlDays 天的旧 staging 目录；返回清理数量。
+ * activeNames 中正在使用的插件名目录会被跳过（防止误删活跃任务）。
+ */
+export async function cleanupStaleStaging(
+  stagingRoot: string,
+  ttlDays: number,
+  activeNames: ReadonlySet<string> = new Set(),
+): Promise<number> {
   if (ttlDays <= 0) return 0
   let entries
   try {
@@ -336,10 +340,11 @@ export async function cleanupStaleStaging(stagingRoot: string, ttlDays: number):
   } catch {
     return 0
   }
-  const cutoff = Date.now() - ttlDays * 86_400_000
+  const cutoff = Date.now() - ttlDays * MS_PER_DAY
   let removed = 0
   for (const entry of entries) {
     if (!entry.isDirectory() || entry.name === '.pnpm-store') continue
+    if (activeNames.has(entry.name)) continue
     const full = path.join(stagingRoot, entry.name)
     try {
       const meta = await stat(full)
@@ -408,8 +413,8 @@ async function runForgeLocked(options: RunForgeOptions, name: string): Promise<F
   const staging = path.join(stagingRoot, name)
   const target = path.join(targetRoot, name)
 
-  // 0. 顺带清理过期的旧 staging（配置开启时）。
-  await cleanupStaleStaging(stagingRoot, config.stagingTtlDays)
+  // 0. 顺带清理过期的旧 staging（配置开启时；跳过当前活跃的 name）。
+  await cleanupStaleStaging(stagingRoot, config.stagingTtlDays, activeForge)
 
   // 1. 目标存在性检查（防止误覆盖）。
   const targetExists = await pathExists(target)
@@ -449,7 +454,7 @@ async function runForgeLocked(options: RunForgeOptions, name: string): Promise<F
     logger?.warn('forge_plugin: 子代理未正常完成 %s（%s）', name, child.stopReason)
     throw new Error(
       `子代理未正常完成（${child.stopReason}）。staging 保留在 ${toPosix(staging)}。`
-      + (child.text.trim() === '' ? '' : `\n部分输出：\n${child.text.slice(0, 1500)}`),
+      + (child.text.trim() === '' ? '' : `\n部分输出：\n${truncateTail(child.text.trim(), CHILD_TEXT_TAIL)}`),
     )
   }
   const report = parseChildReport(child.text)
@@ -465,7 +470,7 @@ async function runForgeLocked(options: RunForgeOptions, name: string): Promise<F
       files: [],
       duplicated: true,
       existingName: report.duplicateOf.trim(),
-      childReport: (report.duplicateNote ?? '').slice(0, 500),
+      childReport: truncateTail(report.duplicateNote ?? '', TEXT_TAIL),
     })
   }
 
@@ -475,92 +480,31 @@ async function runForgeLocked(options: RunForgeOptions, name: string): Promise<F
     throw new Error(`子代理未在 staging 产出任何文件：${toPosix(staging)}`)
   }
 
-  // 5. 迁移 + 目标验证 + 提交。
+  // 5. 迁移 + 目标验证 + 提交（独立函数，便于单独测试）。
   let migratedTo: string | undefined
   let committed = false
   let commitSubject: string | undefined
   let build = 'skipped'
   let installed = false
   if (migrate) {
-    migratedTo = target
-    await copyInto(staging, migratedTo)
-    // 更新模式：同步删除目标中 staging 已不存在的源文件（防残留）。
-    if (mode === 'update') {
-      await syncRemoveStale(staging, migratedTo)
-    }
-    const packageJson = path.join(migratedTo, 'package.json')
-    if (await pathExists(packageJson)) {
-      await rewriteHarnessLinks(packageJson, staging, migratedTo, harnessRoot)
-      await assertNoRegistryHarnessDeps(packageJson, harnessRoot)
-    }
-    // CI 里的 deepseek-harness 相对路径也要从 staging 深度对齐到目标深度。
-    await rewriteCiHarnessPaths(
-      path.join(migratedTo, '.github', 'workflows', 'ci.yml'),
-      migratedTo,
-      harnessRoot,
-    )
-    await ensureGitignore(migratedTo)
-    build = await verifyBuildInTarget(migratedTo, config)
-    if (build !== 'passed') {
-      logger?.warn('forge_plugin: 迁移后构建验证失败 %s：%s', name, build)
-      throw new Error(
-        `迁移后构建验证失败：${build}\nstaging 保留在 ${toPosix(staging)}，目标目录为 ${toPosix(migratedTo)}。`
-        + ' 请检查 link 路径改写或依赖；修复后可对目标目录重试 pnpm install && pnpm build，'
-        + ' 重试 forge 时请带 update=true（目标目录已存在）。',
-      )
-    }
-    // 加载冒烟：构建通过不等于能加载——apply 期错误（如命令 input.hint 为空）
-    // 会让 DSH 重启时整个插件树崩溃（真实事故：session-notes）。此处拦截。
-    const load = await verifyPluginLoad(migratedTo)
-    if (!load.ok) {
-      logger?.warn('forge_plugin: 加载冒烟未通过 %s：%s', name, load.detail ?? '')
-      throw new Error(
-        `加载冒烟未通过，已阻止交付：${load.detail ?? ''}`
-        + `\n请修复 apply 期错误后重试（staging 保留在 ${toPosix(staging)}，目标目录为 ${toPosix(migratedTo)}，重试带 update=true）。`,
-      )
-    }
-    // 功能完成 → 立即提交（非定时）；提交前 stageAll 已检查 diff。
-    await ensureGitRepo(migratedTo)
-    const hasChanges = await stageAll(migratedTo)
-    if (hasChanges) {
-      commitSubject = buildCommitSubject(config.commitType, name, report?.summaryEn)
-      await commitStaged(migratedTo, commitSubject, {
-        name: config.gitAuthorName,
-        email: config.gitAuthorEmail,
-      })
-      committed = true
-      logger?.info('forge_plugin: 已提交 %s：%s', toPosix(migratedTo), commitSubject)
-    }
-    const migratedPath = toPosix(migratedTo)
-    const previous = (await loadRegistry()).repos.find((repo) => samePath(repo.path, migratedPath))
-    const entry: ForgeRepoEntry = {
+    const outcome = await migrateAndCommit({
+      config,
       name,
-      path: migratedPath,
-      createdAt: previous?.createdAt ?? new Date().toISOString(),
-      lastCommitAt: committed ? new Date().toISOString() : previous?.lastCommitAt,
-      commitCount: (previous?.commitCount ?? 0) + (committed ? 1 : 0),
-      summaryZh: report?.summaryZh?.slice(0, 60) ?? previous?.summaryZh,
-    }
-    await upsertRepo(entry)
-    // push 默认关闭（AGENTS.md：不自动 push）；仅在配置显式开启时执行。
-    if (committed && config.push) {
-      await runCommand('git', ['push'], { cwd: migratedTo, timeoutMs: config.childTimeoutMs })
-    }
-    // 自迭代流程：install: true 且配置了 installProfile 时，装入 profile 立即可用。
-    // 默认关闭（不擅自修改用户 profile 配置）。
-    if (args.install === true && config.installProfile.trim() !== '') {
-      const install = await runCommand(
-        'dsh',
-        ['plugin', '--profile', config.installProfile.trim(), 'add', `link:${migratedPath}`],
-        { cwd: migratedTo, timeoutMs: config.childTimeoutMs },
-      )
-      if (install.code !== 0) {
-        logger?.warn('forge_plugin: 装入 profile 失败 %s：%s', name, install.stderr.trim())
-      } else {
-        installed = true
-        logger?.info('forge_plugin: 已装入 profile %s：%s', config.installProfile.trim(), migratedPath)
-      }
-    }
+      staging,
+      target,
+      harnessRoot,
+      mode,
+      args,
+      signal,
+      report,
+      childText: child.text,
+      logger,
+    })
+    migratedTo = outcome.migratedTo
+    committed = outcome.committed
+    commitSubject = outcome.commitSubject
+    build = outcome.build
+    installed = outcome.installed
   }
 
   // 6. 收尾：保留 staging（默认）供排查。
@@ -576,9 +520,133 @@ async function runForgeLocked(options: RunForgeOptions, name: string): Promise<F
     commitSubject,
     build,
     files,
-    childReport: report === undefined ? child.text.slice(0, 500) : (report.notes ?? '').slice(0, 500),
+    childReport: report === undefined ? truncateTail(child.text, TEXT_TAIL) : truncateTail(report.notes ?? '', TEXT_TAIL),
     installed,
   })
+}
+
+/** migrateAndCommit 的结果。 */
+export interface MigrateOutcome {
+  readonly migratedTo: string
+  readonly committed: boolean
+  readonly commitSubject?: string
+  readonly build: string
+  readonly installed: boolean
+}
+
+/** migrateAndCommit 的输入。 */
+interface MigrateOptions {
+  readonly config: ForgeConfig
+  readonly name: string
+  readonly staging: string
+  readonly target: string
+  readonly harnessRoot: string
+  readonly mode: 'create' | 'update'
+  readonly args: ForgeArgs
+  readonly signal: AbortSignal
+  readonly report: ChildReport | undefined
+  readonly childText: string
+  readonly logger?: ForgeLogger
+}
+
+/**
+ * 迁移 + 目标验证 + 提交 + 登记 + push + profile 安装。
+ * 从 runForgeLocked 拆出：任一关键失败 throw（staging 保留供排查）。
+ */
+export async function migrateAndCommit(options: MigrateOptions): Promise<MigrateOutcome> {
+  const { config, name, staging, target, harnessRoot, mode, args, signal, report, logger } = options
+  const migratedTo = target
+
+  // B3 守卫：目标存在性检查在子代理启动前做过，但子代理开发期间（可能数十分钟）
+  // 目标目录可能被其他进程创建/改写——复制前重新检查，防静默覆盖。
+  if (mode === 'create' && (await pathExists(target))) {
+    throw new Error(
+      `目标目录在子代理开发期间被创建：${toPosix(target)}。请换一个 name，或设置 update=true 明确更新。`,
+    )
+  }
+
+  await copyInto(staging, migratedTo)
+  // 更新模式：同步删除目标中 staging 已不存在的源文件（防残留）。
+  if (mode === 'update') {
+    await syncRemoveStale(staging, migratedTo)
+  }
+  const packageJson = path.join(migratedTo, 'package.json')
+  if (await pathExists(packageJson)) {
+    await rewriteHarnessLinks(packageJson, migratedTo, harnessRoot)
+    await assertNoRegistryHarnessDeps(packageJson, harnessRoot)
+  }
+  // CI 里的 deepseek-harness 相对路径也要从 staging 深度对齐到目标深度。
+  await rewriteCiHarnessPaths(
+    path.join(migratedTo, '.github', 'workflows', 'ci.yml'),
+    migratedTo,
+    harnessRoot,
+  )
+  await ensureGitignore(migratedTo)
+  const build = await verifyBuildInTarget(migratedTo, config, signal)
+  if (build !== 'passed') {
+    logger?.warn('forge_plugin: 迁移后构建验证失败 %s：%s', name, build)
+    throw new Error(
+      `迁移后构建验证失败：${build}\nstaging 保留在 ${toPosix(staging)}，目标目录为 ${toPosix(migratedTo)}。`
+      + ' 请检查 link 路径改写或依赖；修复后可对目标目录重试 pnpm install && pnpm build，'
+      + ' 重试 forge 时请带 update=true（目标目录已存在）。',
+    )
+  }
+  // 加载冒烟：构建通过不等于能加载——apply 期错误（如命令 input.hint 为空）
+  // 会让 DSH 重启时整个插件树崩溃（真实事故：session-notes）。此处拦截。
+  const load = await verifyPluginLoad(migratedTo)
+  if (!load.ok) {
+    logger?.warn('forge_plugin: 加载冒烟未通过 %s：%s', name, load.detail ?? '')
+    throw new Error(
+      `加载冒烟未通过，已阻止交付：${load.detail ?? ''}`
+      + `\n请修复 apply 期错误后重试（staging 保留在 ${toPosix(staging)}，目标目录为 ${toPosix(migratedTo)}，重试带 update=true）。`,
+    )
+  }
+  // 功能完成 → 立即提交（非定时）；提交前 stageAll 已检查 diff。
+  await ensureGitRepo(migratedTo)
+  const hasChanges = await stageAll(migratedTo)
+  let commitSubject: string | undefined
+  let committed = false
+  if (hasChanges) {
+    commitSubject = buildCommitSubject(config.commitType, name, report?.summaryEn)
+    await commitStaged(migratedTo, commitSubject, {
+      name: config.gitAuthorName,
+      email: config.gitAuthorEmail,
+    })
+    committed = true
+    logger?.info('forge_plugin: 已提交 %s：%s', toPosix(migratedTo), commitSubject)
+  }
+  const migratedPath = toPosix(migratedTo)
+  const previous = (await loadRegistry()).repos.find((repo) => samePath(repo.path, migratedPath))
+  const entry: ForgeRepoEntry = {
+    name,
+    path: migratedPath,
+    createdAt: previous?.createdAt ?? new Date().toISOString(),
+    lastCommitAt: committed ? new Date().toISOString() : previous?.lastCommitAt,
+    commitCount: (previous?.commitCount ?? 0) + (committed ? 1 : 0),
+    summaryZh: report?.summaryZh?.slice(0, 60) ?? previous?.summaryZh,
+  }
+  await upsertRepo(entry)
+  // push 默认关闭（AGENTS.md：不自动 push）；仅在配置显式开启时执行。
+  if (committed && config.push) {
+    await runCommand('git', ['push'], { cwd: migratedTo, timeoutMs: config.childTimeoutMs, signal })
+  }
+  // 自迭代流程：install: true 且配置了 installProfile 时，装入 profile 立即可用。
+  // 默认关闭（不擅自修改用户 profile 配置）。
+  let installed = false
+  if (args.install === true && config.installProfile.trim() !== '') {
+    const install = await runCommand(
+      'dsh',
+      ['plugin', '--profile', config.installProfile.trim(), 'add', `link:${migratedPath}`],
+      { cwd: migratedTo, timeoutMs: config.childTimeoutMs, signal },
+    )
+    if (install.code !== 0) {
+      logger?.warn('forge_plugin: 装入 profile 失败 %s：%s', name, install.stderr.trim())
+    } else {
+      installed = true
+      logger?.info('forge_plugin: 已装入 profile %s：%s', config.installProfile.trim(), migratedPath)
+    }
+  }
+  return { migratedTo, committed, commitSubject, build, installed }
 }
 
 /** 注册 forge_plugin 工具；返回撤销函数。 */

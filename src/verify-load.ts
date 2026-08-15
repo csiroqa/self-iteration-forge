@@ -3,11 +3,15 @@
  * dsh-commands/dsh-tools 加载校验的假服务执行插件 apply，拦截 apply 期
  * 错误（命令 input.hint 为空等，真实事故：session-notes 导致启动崩溃）。
  * 仅覆盖 inject ⊆ {commands, tools} 的插件；其他跳过（由构建检查补充）。
+ *
+ * 校验规则为 dsh-commands 的复刻（对照锚点：deepseek-harness
+ * packages/interaction/commands/src/index.ts 的 normalizeDefinition，
+ * 正则与错误消息需逐字一致）；harness 侧改动规则时需同步本文件，
+ * 建议在 CI 中加一条"与 harness 规则一致性"对照测试。
  */
 import { Context } from '@deepseek-ai/cordis'
-import { pathToFileURL } from 'node:url'
 import path from 'node:path'
-import { pathExists } from './migrate.ts'
+import { loadPluginLib, normalizeInject } from './hotmount.ts'
 
 /** dsh-commands 的命令名校验（与 normalizeDefinition 一致）。 */
 const COMMAND_NAME = /^[a-z][a-z0-9_-]*$/u
@@ -61,24 +65,17 @@ export interface VerifyLoadResult {
 
 /** 对已迁移插件做加载冒烟；返回 ok=false 时该插件不应被交付/安装。 */
 export async function verifyPluginLoad(dir: string): Promise<VerifyLoadResult> {
-  const libPath = path.join(dir, 'lib', 'index.js')
-  if (!(await pathExists(libPath))) {
-    return { ok: true, detail: 'skipped: lib/index.js 不存在' }
-  }
-  let mod: { name?: string; inject?: string[] | Record<string, unknown>; apply?: unknown }
-  try {
-    // cache-busting：避免模块缓存导致重复校验拿到旧实例。
-    const url = `${pathToFileURL(libPath).href}?verify=${Date.now()}`
-    mod = (await import(url)) as typeof mod
-  } catch (error) {
-    return { ok: false, detail: `模块加载失败：${error instanceof Error ? error.message : String(error)}` }
-  }
-  if (typeof mod.apply !== 'function') {
-    return { ok: false, detail: '模块缺少 apply 导出（不是有效的插件入口）' }
+  const { mod, detail } = await loadPluginLib(dir, 'verify')
+  if (mod === undefined) {
+    // lib 缺失属于"未构建"，由构建层防线兜底（保持原语义：skipped 视为 ok）。
+    if (detail !== undefined && detail.includes('lib/index.js 不存在')) {
+      return { ok: true, detail: 'skipped: lib/index.js 不存在' }
+    }
+    return { ok: false, detail: `模块加载失败：${detail ?? '未知错误'}` }
   }
   // 只覆盖 inject ⊆ {commands, tools} 的插件；其他服务无法精确复刻，跳过。
-  const injectNames = Array.isArray(mod.inject) ? mod.inject : Object.keys(mod.inject ?? {})
-  const unmockable = injectNames.filter((name) => !MOCKABLE_SERVICES.has(name))
+  const injectNames = normalizeInject(mod.inject)
+  const unmockable = (injectNames ?? []).filter((name) => !MOCKABLE_SERVICES.has(name))
   if (unmockable.length > 0) {
     return { ok: true, detail: `skipped: 注入服务无法复刻（${unmockable.join(', ')}）` }
   }

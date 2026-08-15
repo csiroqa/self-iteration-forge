@@ -9,16 +9,18 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { ensureGitignore, rewriteCiHarnessPaths, rewriteHarnessLinks, syncRemoveStale } from './migrate.ts'
-import { assertNoRegistryHarnessDeps, parseChildReport, resolveTargetRoot } from './forge.ts'
+import { assertNoRegistryHarnessDeps, cleanupStaleStaging, parseChildReport, resolveTargetRoot } from './forge.ts'
 import { commitStaged, ensureGitRepo, stageAll } from './git.ts'
 import { loadRegistry, saveRegistry } from './registry.ts'
 import {
   buildCommitSubject,
+  fnv1a,
   normalizePluginName,
   relativeLink,
   samePath,
   slugFromRequirement,
   toPosix,
+  truncateTail,
 } from './utils.ts'
 
 let tempRoot: string
@@ -94,7 +96,7 @@ describe('rewriteHarnessLinks', () => {
       },
     }, null, 2))
 
-    const changed = await rewriteHarnessLinks(pkgPath, staging, target, harness)
+    const changed = await rewriteHarnessLinks(pkgPath, target, harness)
     expect(changed).toBe(2)
 
     const rewritten = JSON.parse(await readFile(pkgPath, 'utf8')) as {
@@ -113,7 +115,7 @@ describe('rewriteHarnessLinks', () => {
     await mkdir(staging, { recursive: true })
     const pkgPath = path.join(staging, 'package.json')
     await writeFile(pkgPath, JSON.stringify({ dependencies: { 'some-local': 'link:../other-lib' } }))
-    const changed = await rewriteHarnessLinks(pkgPath, staging, target, harness)
+    const changed = await rewriteHarnessLinks(pkgPath, target, harness)
     expect(changed).toBe(0)
   })
 
@@ -126,7 +128,7 @@ describe('rewriteHarnessLinks', () => {
     // 预填充自 target：链接文本已是目标深度 ../deepseek-harness。
     const targetLink = `link:${relativeLink(target, harness)}/vendor/cordis`
     await writeFile(pkgPath, JSON.stringify({ dependencies: { '@deepseek-ai/cordis': targetLink } }))
-    const changed = await rewriteHarnessLinks(pkgPath, staging, target, harness)
+    const changed = await rewriteHarnessLinks(pkgPath, target, harness)
     expect(changed).toBe(0)
     const pkg = JSON.parse(await readFile(pkgPath, 'utf8')) as { dependencies: Record<string, string> }
     expect(pkg.dependencies['@deepseek-ai/cordis']).toBe(targetLink)
@@ -142,7 +144,7 @@ describe('rewriteHarnessLinks', () => {
     await writeFile(pkgPath, JSON.stringify({
       dependencies: { '@deepseek-ai/cordis': 'link:../../../deepseek-harness/vendor/cordis' },
     }))
-    const changed = await rewriteHarnessLinks(pkgPath, staging, target, harness)
+    const changed = await rewriteHarnessLinks(pkgPath, target, harness)
     expect(changed).toBe(1)
     const pkg = JSON.parse(await readFile(pkgPath, 'utf8')) as { dependencies: Record<string, string> }
     expect(pkg.dependencies['@deepseek-ai/cordis'])
@@ -383,11 +385,10 @@ describe('git 集成（真实 git，临时目录）', () => {
     await ensureGitRepo(repo)
     await writeFile(path.join(repo, 'hello.txt'), 'hi\n')
     expect(await stageAll(repo)).toBe(true)
-    const committed = await commitStaged(repo, 'feat: demo: add hello file', {
+    await commitStaged(repo, 'feat: demo: add hello file', {
       name: 'Forge Test',
       email: 'forge@test.local',
     })
-    expect(committed).toBe(true)
     // 验证提交确实存在且 subject 正确。
     const { runCommand } = await import('./utils.ts')
     const log = await runCommand('git', ['log', '-1', '--format=%s'], { cwd: repo })
@@ -395,5 +396,77 @@ describe('git 集成（真实 git，临时目录）', () => {
     expect(log.stdout.trim()).toBe('feat: demo: add hello file')
     // 无新改动时 stageAll 返回 false（提交前检查 diff）。
     expect(await stageAll(repo)).toBe(false)
+  })
+})
+
+describe('buildCommitSubject 边界（B7 回归）', () => {
+  it('极长 name 时主题仍不超过 72 字符', () => {
+    const longName = 'a'.repeat(80)
+    const subject = buildCommitSubject('feat', longName, 'add something')
+    expect(subject.length).toBeLessThanOrEqual(72)
+    expect(subject.startsWith('feat: ')).toBe(true)
+  })
+
+  it('极长 name 且无摘要时仍不超过 72 字符', () => {
+    const subject = buildCommitSubject('feat', 'b'.repeat(100), undefined)
+    expect(subject.length).toBeLessThanOrEqual(72)
+  })
+})
+
+describe('truncateTail（B6 回归：代理对安全截断）', () => {
+  it('普通文本按长度截断', () => {
+    expect(truncateTail('hello world', 5)).toBe('hello')
+  })
+
+  it('不超过上限时原样返回', () => {
+    const text = 'abc😀'
+    expect(truncateTail(text, 10)).toBe(text)
+  })
+
+  it('截断点落在代理对中间时回退一位，不产生孤立 surrogate', () => {
+    const text = 'abc😀def' // 😀 是代理对（2 码元：\uD83D\uDE00）
+    // max=4 恰好切在代理对中间（'abc' + 高代理 \uD83D），应回退一位为 'abc'。
+    const cut = truncateTail(text, 4)
+    expect(cut).toBe('abc')
+    expect(cut.length).toBe(3)
+    // max=5 恰好落在代理对之后，完整保留 'abc😀'。
+    expect(truncateTail(text, 5)).toBe('abc😀')
+  })
+})
+
+describe('cleanupStaleStaging（M11 补测）', () => {
+  it('只清理超过 TTL 的目录，且跳过 activeNames', async () => {
+    const stagingRoot = path.join(tempRoot, 'staging-root')
+    const oldDir = path.join(stagingRoot, 'old-plugin')
+    const freshDir = path.join(stagingRoot, 'fresh-plugin')
+    const activeDir = path.join(stagingRoot, 'active-plugin')
+    await mkdir(oldDir, { recursive: true })
+    await mkdir(freshDir, { recursive: true })
+    await mkdir(activeDir, { recursive: true })
+    // 把 old 目录的 mtime 改到 TTL 之前。
+    const past = new Date(Date.now() - 10 * 86_400_000)
+    await Promise.all([stat(oldDir), stat(freshDir), stat(activeDir)])
+
+    // 用 fs.utimes 把 old 的 mtime 调旧（其余保持当前时间）。
+    const { utimes } = await import('node:fs/promises')
+    await utimes(oldDir, past, past)
+
+    const removed = await cleanupStaleStaging(stagingRoot, 2, new Set(['active-plugin']))
+    expect(removed).toBe(1)
+    await expect(stat(oldDir)).rejects.toThrow()
+    await expect(stat(freshDir)).resolves.toBeDefined()
+    await expect(stat(activeDir)).resolves.toBeDefined()
+  })
+
+  it('ttlDays <= 0 时不做清理', async () => {
+    const stagingRoot = path.join(tempRoot, 'staging-root-zero')
+    await mkdir(path.join(stagingRoot, 'x'), { recursive: true })
+    expect(await cleanupStaleStaging(stagingRoot, 0)).toBe(0)
+  })
+})
+
+describe('fnv1a 稳定性', () => {
+  it('同一输入产出同一哈希', () => {
+    expect(fnv1a('做一个支持定时任务的插件')).toBe(fnv1a('做一个支持定时任务的插件'))
   })
 })

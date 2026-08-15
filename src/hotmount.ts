@@ -10,23 +10,52 @@ export interface HotMountResult {
   readonly detail?: string
 }
 
-/** 动态挂载一个已迁移插件的 host 半区到当前运行时。 */
-export async function mountPlugin(ctx: Context, dir: string): Promise<HotMountResult> {
+/** 进程内单调自增序号：与时间戳组合成唯一 cache-bust 后缀（避免同毫秒命中 ESM 缓存）。 */
+let mountSeq = 0
+
+/** 归一化插件声明的 inject（字符串/数组/对象三种形态 → 服务名数组）。 */
+export function normalizeInject(inject: unknown): string[] | undefined {
+  if (inject === undefined || inject === null) return undefined
+  if (typeof inject === 'string') return [inject]
+  if (Array.isArray(inject)) return inject.filter((name): name is string => typeof name === 'string')
+  if (typeof inject === 'object') return Object.keys(inject)
+  return undefined
+}
+
+/**
+ * 动态加载已迁移插件的 lib/index.js（cache-busting 保证更新后强制新实例）。
+ * 返回模块或失败原因（失败不抛出）。成功时 apply 已收窄为函数。
+ */
+export async function loadPluginLib(
+  dir: string,
+  tag: string,
+): Promise<{ mod?: Plugin.Object & { apply: NonNullable<Plugin.Object['apply']> }; detail?: string }> {
   const libPath = path.join(dir, 'lib', 'index.js')
   if (!(await pathExists(libPath))) {
-    return { ok: false, detail: `lib/index.js 不存在：${path.join(dir, 'lib')}` }
+    return { detail: `lib/index.js 不存在：${path.join(dir, 'lib')}` }
   }
   try {
     // cache-busting：同一路径反复 import 命中 ESM 缓存，更新后必须强制新实例。
-    const url = `${pathToFileURL(libPath).href}?forge=${Date.now()}`
+    const url = `${pathToFileURL(libPath).href}?${tag}=${Date.now()}-${mountSeq++}`
     const mod = (await import(url)) as Partial<Plugin.Object>
     if (typeof mod.apply !== 'function') {
-      return { ok: false, detail: '模块缺少 apply 导出（不是有效的插件入口）' }
+      return { detail: '模块缺少 apply 导出（不是有效的插件入口）' }
     }
+    return { mod: mod as Plugin.Object & { apply: NonNullable<Plugin.Object['apply']> } }
+  } catch (error) {
+    return { detail: error instanceof Error ? error.message : String(error) }
+  }
+}
+
+/** 动态挂载一个已迁移插件的 host 半区到当前运行时。 */
+export async function mountPlugin(ctx: Context, dir: string): Promise<HotMountResult> {
+  const { mod, detail } = await loadPluginLib(dir, 'forge')
+  if (mod === undefined) return { ok: false, detail }
+  try {
     // 注入可用性检查：当前运行时缺服务时拒绝挂载（等待会静默挂起）。
-    if (mod.inject !== undefined) {
-      const names = Array.isArray(mod.inject) ? mod.inject : Object.keys(mod.inject)
-      const missing = names.filter((service) => ctx.get(service) === undefined)
+    const injectNames = normalizeInject(mod.inject)
+    if (injectNames !== undefined && injectNames.length > 0) {
+      const missing = injectNames.filter((service) => ctx.get(service) === undefined)
       if (missing.length > 0) {
         return {
           ok: false,

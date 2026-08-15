@@ -4,7 +4,7 @@ import path from 'node:path'
 import { relativeLink } from './utils.ts'
 
 /** 复制时排除的目录（node_modules 体积大且可在目标目录重建）。 */
-const EXCLUDED_BASENAMES = new Set(['node_modules', '.git', '.pnpm-store'])
+export const EXCLUDED_BASENAMES = new Set(['node_modules', '.git', '.pnpm-store'])
 
 /** 同步删除时保护的目录（仓库元数据与构建产物/依赖，不做源文件同步）。 */
 const SYNC_PROTECTED_BASENAMES = new Set(['.git', 'node_modules', '.pnpm-store', 'lib', 'dist'])
@@ -39,7 +39,6 @@ export async function copyInto(source: string, target: string): Promise<void> {
  */
 export async function rewriteHarnessLinks(
   packageJsonPath: string,
-  _fromDir: string,
   toDir: string,
   harnessRoot: string,
 ): Promise<number> {

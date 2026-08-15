@@ -3,6 +3,18 @@ import { execFile } from 'node:child_process'
 import { homedir } from 'node:os'
 import path from 'node:path'
 
+/** 单条外部命令的默认超时（毫秒）。 */
+export const DEFAULT_CMD_TIMEOUT_MS = 120_000
+
+/** execFile 捕获 stdout/stderr 的内存上限（字节）。 */
+export const CMD_MAX_BUFFER = 64 * 1024 * 1024
+
+/** findHarnessRoot 向上搜索的最大层数。 */
+export const HARNESS_SEARCH_DEPTH = 10
+
+/** 错误消息中携带的命令输出尾部长度。 */
+export const ERROR_OUTPUT_TAIL = 2000
+
 /** 一次外部命令的完整结果（无论退出码如何都返回，由调用方决定成败）。 */
 export interface ExecResult {
   /** 进程退出码；-1 表示进程被信号终止或超时。 */
@@ -11,7 +23,7 @@ export interface ExecResult {
   readonly stderr: string
 }
 
-/** 命令在进程级无法启动（ENOENT / EPERM / 超时等）时抛出。 */
+/** 命令在进程级无法启动（ENOENT / EPERM / 超时 / 输出超限等）时抛出。 */
 export class SpawnError extends Error {
   constructor(message: string) {
     super(message)
@@ -24,7 +36,7 @@ export class CommandFailedError extends Error {
   readonly result: ExecResult
 
   constructor(label: string, result: ExecResult) {
-    super(`${label} 失败（exit=${result.code}）：${(result.stderr || result.stdout).trim().slice(0, 2000)}`)
+    super(`${label} 失败（exit=${result.code}）：${(result.stderr || result.stdout).trim().slice(0, ERROR_OUTPUT_TAIL)}`)
     this.name = 'CommandFailedError'
     this.result = result
   }
@@ -32,23 +44,40 @@ export class CommandFailedError extends Error {
 
 /**
  * Windows 下 pnpm/npm/dsh 是 .cmd 包装器，CreateProcess 无法直接执行
- * （execFile 会抛 EINVAL），必须经 cmd.exe 中转；/s 让 cmd 正确
- * 处理带引号的整条命令。其余可执行文件直接 spawn。
+ * （execFile 会抛 EINVAL），必须经 cmd.exe 中转。
+ *
+ * 转义策略：把整条命令拼成单个字符串交给 cmd /d /s /c，并对每个参数做
+ * cmd 级引用——参数含空格/元字符时用双引号包裹、元字符前置 ^ 转义。
+ * windowsVerbatimArguments 关闭 Node 的二次引号处理（否则与 cmd 的
+ * 引号解析规则不一致，含空格参数会被拆断）。其余可执行文件直接 spawn。
  */
-function resolveSpawn(bin: string, args: readonly string[]): { file: string; args: string[] } {
+function cmdQuote(arg: string): string {
+  const escaped = arg.replace(/([&|<>^()%!])/g, '^$1').replace(/"/g, '""')
+  return /[\s"&|<>^()%!]/.test(escaped) ? `"${escaped}"` : escaped
+}
+
+function resolveSpawn(
+  bin: string,
+  args: readonly string[],
+): { file: string; args: string[]; verbatim: boolean } {
   if (process.platform === 'win32' && (bin === 'pnpm' || bin === 'npm' || bin === 'npx' || bin === 'dsh')) {
-    return { file: process.env.COMSPEC ?? 'cmd.exe', args: ['/d', '/s', '/c', `${bin}.cmd`, ...args] }
+    const cmdline = [bin, ...args].map(cmdQuote).join(' ')
+    return {
+      file: process.env.COMSPEC ?? 'cmd.exe',
+      args: ['/d', '/s', '/c', cmdline],
+      verbatim: true,
+    }
   }
-  return { file: bin, args: [...args] }
+  return { file: bin, args: [...args], verbatim: false }
 }
 
 /** 运行外部命令并完整捕获输出（host 半区代码，非沙箱 shell）。 */
 export function runCommand(
   bin: string,
   args: readonly string[],
-  options: { cwd: string; timeoutMs?: number },
+  options: { cwd: string; timeoutMs?: number; signal?: AbortSignal },
 ): Promise<ExecResult> {
-  const { file, args: spawnArgs } = resolveSpawn(bin, args)
+  const { file, args: spawnArgs, verbatim } = resolveSpawn(bin, args)
   return new Promise<ExecResult>((resolve, reject) => {
     execFile(
       file,
@@ -56,23 +85,25 @@ export function runCommand(
       {
         cwd: options.cwd,
         windowsHide: true,
-        timeout: options.timeoutMs ?? 120_000,
-        maxBuffer: 64 * 1024 * 1024,
+        windowsVerbatimArguments: verbatim,
+        timeout: options.timeoutMs ?? DEFAULT_CMD_TIMEOUT_MS,
+        maxBuffer: CMD_MAX_BUFFER,
+        signal: options.signal,
       },
       (error, stdout, stderr) => {
         if (error === null) {
           resolve({ code: 0, stdout, stderr })
           return
         }
-        const code = typeof error.code === 'number' ? error.code : -1
-        if (code === 0) {
-          // 理论上不会走到这里；防御性处理。
-          resolve({ code: 0, stdout, stderr })
+        // 输出超过 maxBuffer：execFile 以 ERR_MAX_BUFFER 终止。
+        if (error instanceof Error && 'code' in error && error.code === 'ERR_MAX_BUFFER') {
+          reject(new SpawnError(`${bin} 输出超过 ${CMD_MAX_BUFFER / 1024 / 1024}MB 缓冲上限，命令被终止`))
           return
         }
+        const code = typeof error.code === 'number' ? error.code : -1
         if (code === -1) {
-          // 进程级失败（ENOENT / EPERM / 超时 / 信号）。
-          reject(new SpawnError(`${bin} 无法启动或超时：${error.message}`))
+          // 进程级失败（ENOENT / EPERM / 超时 / 信号 / 取消）。
+          reject(new SpawnError(`${bin} 无法启动、被取消或超时：${error.message}`))
           return
         }
         resolve({ code, stdout, stderr })
@@ -107,13 +138,15 @@ export function fnv1a(text: string): number {
   return hash >>> 0
 }
 
-/** 从需求文本生成缺省插件名（取前几个有意义的英文单词）。 */
+/**
+ * 从需求文本生成缺省插件名（取前几个有意义的英文单词）。
+ * 注意：匹配正则只产出 ASCII 单词，纯中文需求走哈希回退分支。
+ */
 export function slugFromRequirement(requirement: string): string {
   const words = requirement.toLowerCase().match(/[a-z][a-z0-9]*/g) ?? []
   const stop = new Set([
     'the', 'a', 'an', 'for', 'with', 'and', 'of', 'to', 'in', 'on', 'at', 'by',
     'plugin', 'dsh', 'make', 'create', 'build', 'add', 'need', 'want', 'please',
-    '功能', '一个', '插件', '需要', '实现', '支持', '用于',
   ])
   const picked: string[] = []
   for (const word of words) {
@@ -158,10 +191,26 @@ export function toPosix(p: string): string {
   return p.split(path.sep).join('/')
 }
 
-/** 从工作目录向上查找 deepseek-harness 检出根（含 vendor/cordis 者视为有效）。 */
-export async function findHarnessRoot(startDir: string): Promise<string> {
+/**
+ * 从工作目录向上查找 deepseek-harness 检出根（含 vendor/cordis 者视为有效）。
+ * 结果按起点缓存，避免同宿主多次 forge 重复上溯。
+ */
+const harnessRootCache = new Map<string, Promise<string>>()
+
+export function findHarnessRoot(startDir: string): Promise<string> {
+  const resolved = path.resolve(startDir)
+  const cached = harnessRootCache.get(resolved)
+  if (cached !== undefined) return cached
+  const promise = searchHarnessRoot(resolved)
+  harnessRootCache.set(resolved, promise)
+  // 失败也缓存（同一起点必然再失败），防止抖动重试。
+  promise.catch(() => harnessRootCache.delete(resolved))
+  return promise
+}
+
+async function searchHarnessRoot(startDir: string): Promise<string> {
   let dir = path.resolve(startDir)
-  for (let depth = 0; depth < 10; depth += 1) {
+  for (let depth = 0; depth < HARNESS_SEARCH_DEPTH; depth += 1) {
     const candidate = path.join(dir, 'deepseek-harness')
     const marker = path.join(candidate, 'vendor', 'cordis')
     try {
@@ -176,7 +225,7 @@ export async function findHarnessRoot(startDir: string): Promise<string> {
     dir = parent
   }
   throw new Error(
-    `找不到 deepseek-harness 检出（从 ${startDir} 向上 10 层内均无 vendor/cordis 标记）。`
+    `找不到 deepseek-harness 检出（从 ${startDir} 向上 ${HARNESS_SEARCH_DEPTH} 层内均无 vendor/cordis 标记）。`
     + ' 请在插件配置中设置 harnessRoot。',
   )
 }
@@ -195,7 +244,8 @@ export function cleanSummaryEn(input: string | undefined): string {
 
 /**
  * 组装英文 Conventional Commit 主题（header ≤ 72 字符）：
- * `<type>: <name>[: <summary>]`。summary 过长时按剩余预算截断。
+ * `<type>: <name>[: <summary>]`。type/name/summary 三者按预算逐级截断，
+ * 任何情况下都不超过 72 字符。
  */
 export function buildCommitSubject(
   commitType: string,
@@ -204,9 +254,30 @@ export function buildCommitSubject(
 ): string {
   const type = /^[a-z][a-z0-9-]*$/.test(commitType) ? commitType : 'feat'
   const summary = cleanSummaryEn(summaryEn)
-  if (summary === '') return `${type}: ${name}`
-  const prefix = `${type}: ${name}: `
-  const budget = 72 - prefix.length
-  const clipped = budget > 0 ? summary.slice(0, budget) : ''
-  return clipped === '' ? `${type}: ${name}` : `${prefix}${clipped}`
+  // 逐级压缩：先完整组合，超长则先截 summary，再截 name。
+  const tryCompose = (n: string): string => {
+    if (summary === '') return `${type}: ${n}`
+    const prefix = `${type}: ${n}: `
+    const budget = 72 - prefix.length
+    return budget > 0 ? `${prefix}${summary.slice(0, budget)}` : `${type}: ${n}`
+  }
+  let subject = tryCompose(name)
+  if (subject.length <= 72) return subject
+  // name 过长：按剩余预算截断 name（保留 summary 时留 2 字符给 ": "）。
+  const nameBudget = 72 - type.length - 2 - (summary === '' ? 0 : 2)
+  if (nameBudget > 0) {
+    subject = tryCompose(name.slice(0, nameBudget))
+  }
+  return subject.length <= 72 ? subject : `${type}: ${name.slice(0, Math.max(1, 72 - type.length - 2))}`
+}
+
+/**
+ * 按码元截断文本，但避免从 UTF-16 代理对中间断开
+ * （截断点落在高代理码元上时回退一位，防止产生孤立 surrogate）。
+ */
+export function truncateTail(text: string, max: number): string {
+  if (text.length <= max) return text
+  const cut = text.slice(0, max)
+  const last = cut.charCodeAt(cut.length - 1)
+  return last >= 0xd800 && last <= 0xdbff ? cut.slice(0, -1) : cut
 }

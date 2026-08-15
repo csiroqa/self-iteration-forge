@@ -16,7 +16,6 @@ const ID = '@dsh-external/plugin-forge'
 /** host 半区运行时值依赖（不内联）。 */
 const HOST_RUNTIME_DEPS = [
   '@deepseek-ai/cordis',
-  '@deepseek-ai/dsh-agent',
   '@deepseek-ai/dsh-commands',
   '@deepseek-ai/dsh-llm',
   '@deepseek-ai/dsh-session',

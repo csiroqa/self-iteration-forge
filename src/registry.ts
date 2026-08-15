@@ -65,16 +65,24 @@ export async function saveRegistry(registry: ForgeRegistry): Promise<void> {
   await rename(tmp, file)
 }
 
+/** 进程内 upsert 写锁链：串行化"读-改-写"，避免并发 forge 丢条目。 */
+let upsertChain: Promise<unknown> = Promise.resolve()
+
 /** 新增或更新一个仓库条目（按 path 匹配，Windows 下大小写不敏感），返回保存后的登记表。 */
 export async function upsertRepo(entry: ForgeRepoEntry): Promise<ForgeRegistry> {
-  const registry = await loadRegistry()
-  const index = registry.repos.findIndex((repo) => samePath(repo.path, entry.path))
-  const repos = index >= 0
-    ? registry.repos.map((repo, i) => (i === index ? entry : repo))
-    : [...registry.repos, entry]
-  const next: ForgeRegistry = { version: 1, repos }
-  await saveRegistry(next)
-  return next
+  const run = upsertChain.then(async () => {
+    const registry = await loadRegistry()
+    const index = registry.repos.findIndex((repo) => samePath(repo.path, entry.path))
+    const repos = index >= 0
+      ? registry.repos.map((repo, i) => (i === index ? entry : repo))
+      : [...registry.repos, entry]
+    const next: ForgeRegistry = { version: 1, repos }
+    await saveRegistry(next)
+    return next
+  })
+  // 链上任一失败不阻塞后续写入。
+  upsertChain = run.catch(() => undefined)
+  return run
 }
 
 function isNodeError(error: unknown): error is NodeJS.ErrnoException {
