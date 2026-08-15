@@ -85,7 +85,7 @@ staging 内 typecheck/test/build → 迁移后目标 `pnpm install && pnpm build
 
 ```sh
 pnpm install && pnpm build
-dsh plugin --profile web add link:D:\2-OGP\plugin-forge
+dsh plugin --profile web add link:D:\2-OGP\dsh-plugin-forge
 ```
 
 重启 `dsh web`。前置：Node ≥ 22、pnpm、本地 deepseek-harness 检出（依赖 link: `../deepseek-harness`）。
@@ -113,6 +113,10 @@ node scripts/llm-e2e-host.mjs run <name> <stagingDir> <targetRoot> <harnessRoot>
 
 ## 演示
 
-![demo-1](docs/demo-1.png)
+agent 自发提出建插件需求的会话截图：
+
+![demo-1：agent 自发提出「每次会话结束自动把对话要点存档为 Markdown」](docs/demo-1.png)
+
+![demo-2：审查后 agent 自发提出固化流程的任务](docs/demo-2.png)
 
 ![demo-2](docs/demo-2.png)

@@ -85,7 +85,7 @@ typecheck/test/build in staging → `pnpm install && pnpm build` in the target a
 
 ```sh
 pnpm install && pnpm build
-dsh plugin --profile web add link:D:\2-OGP\plugin-forge
+dsh plugin --profile web add link:D:\2-OGP\dsh-plugin-forge
 ```
 
 Restart `dsh web`. Prerequisites: Node ≥ 22, pnpm, a local `deepseek-harness` checkout (deps are `link:`ed to `../deepseek-harness`).
@@ -113,6 +113,8 @@ node scripts/llm-e2e-host.mjs run <name> <stagingDir> <targetRoot> <harnessRoot>
 
 ## Demo
 
-![demo-1](docs/demo-1.png)
+Session captures of the agent spontaneously requesting a plugin:
 
-![demo-2](docs/demo-2.png)
+![demo-1: agent spontaneously asks to archive conversation points as Markdown at each session end](docs/demo-1.png)
+
+![demo-2: agent spontaneously proposes a process-hardening task after review](docs/demo-2.png)
