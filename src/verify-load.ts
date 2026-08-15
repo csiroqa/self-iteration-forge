@@ -2,7 +2,7 @@
  * 加载冒烟：构建通过不等于能加载。用真实 cordis Context + 复刻
  * dsh-commands/dsh-tools 加载校验的假服务执行插件 apply，拦截 apply 期
  * 错误（命令 input.hint 为空等，真实事故：session-notes 导致启动崩溃）。
- * 仅覆盖 inject ⊆ {commands, tools} 的插件；其他跳过（构建层兜底）。
+ * 仅覆盖 inject ⊆ {commands, tools} 的插件；其他跳过（由构建检查补充）。
  */
 import { Context } from '@deepseek-ai/cordis'
 import { pathToFileURL } from 'node:url'
@@ -53,7 +53,7 @@ function assertToolDefinition(def: unknown): void {
   }
 }
 
-/** 加载冒烟结果（skipped 视为 ok，由构建层防线兜底）。 */
+/** 加载冒烟结果（skipped 视为 ok，由构建检查补充）。 */
 export interface VerifyLoadResult {
   readonly ok: boolean
   readonly detail?: string

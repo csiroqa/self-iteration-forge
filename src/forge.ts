@@ -70,11 +70,10 @@ export const SELF_ITERATION_SECTION_ORDER = 117
 /** 自迭代引导节（systemPrompt section，随每次提示词组装渲染）。 */
 export function selfIterationSectionText(): string {
   return [
-    '你是 DSH 的自迭代智能体。`forge_plugin` 按需造插件扩展你的能力，**主动使用它是你的默认工作方式**：',
-    '- 执行任务时发现缺工具/命令、只能笨办法重复劳动、或功能值得固化（且单个插件不重）——**立即调用** forge_plugin 补齐，这是完成任务的一部分，不是额外动作；',
-    '- 不要将就完成、不要只给建议；判断值得就直接做。',
-    '- 交付后自动热挂载，本会话即用；能力永久保留、跨会话复用。',
-    '- 遇到阻碍时先自问：这个能力我有没有？没有就造。重复需求用 update=true，子代理自动检测重复。',
+    '你是 DSH 的自迭代智能体：能力不足时用 `forge_plugin` 生成插件补齐，无需用户要求。',
+    '执行任务时若缺少所需工具、只能手工重复处理、或发现可跨会话复用的功能（且规模合适），应调用 `forge_plugin` 生成插件，将其视为任务的一部分，而不是仅给出建议。',
+    '生成后自动热挂载，本会话内即可使用；能力跨会话保留。',
+    '重复需求使用 update=true 迭代，子代理会自动检测重复。',
   ].join('')
 }
 
@@ -119,7 +118,7 @@ export interface ForgeArgs {
   readonly update?: boolean
   /** 迁移并提交成功后是否自动装入 profile（需配置 installProfile）。 */
   readonly install?: boolean
-  /** 迁移并提交成功后是否热挂载到当前运行时（无缝切换，无需重启）。 */
+  /** 迁移并提交成功后是否热挂载到当前运行时（无需重启）。 */
   readonly hot?: boolean
 }
 
@@ -456,7 +455,7 @@ async function runForgeLocked(options: RunForgeOptions, name: string): Promise<F
   }
   const report = parseChildReport(child.text)
 
-  // 3.5 重复检测：子代理发现需求与已有插件重复时，拒绝新建（不重复造轮子）。
+  // 3.5 重复检测：子代理发现需求与已有插件重复时，拒绝新建。
   if (report?.duplicateOf !== undefined && report.duplicateOf.trim() !== '') {
     logger?.info('forge_plugin: 检测到与已有插件重复 %s → %s，未新建', name, report.duplicateOf.trim())
     return withoutUndefined({
@@ -548,7 +547,7 @@ async function runForgeLocked(options: RunForgeOptions, name: string): Promise<F
     if (committed && config.push) {
       await runCommand('git', ['push'], { cwd: migratedTo, timeoutMs: config.childTimeoutMs })
     }
-    // 自迭代闭环：install: true 且配置了 installProfile 时，装入 profile 立即可用。
+    // 自迭代流程：install: true 且配置了 installProfile 时，装入 profile 立即可用。
     // 默认关闭（不擅自修改用户 profile 配置）。
     if (args.install === true && config.installProfile.trim() !== '') {
       const install = await runCommand(
@@ -587,7 +586,7 @@ async function runForgeLocked(options: RunForgeOptions, name: string): Promise<F
 export function registerForgeTool(ctx: Context, config: ForgeConfig): () => void {
   return ctx.tools.register(defineTool({
     name: TOOL_NAME,
-    description: '按需生成 DSH 插件（agent 自迭代）：执行任务中一旦需要缺失的能力、只能笨办法重复劳动、或功能值得固化且单个插件不重，立即调用本工具补齐——主动使用是默认工作方式，调用它是完成任务的一部分，不要将就、不要只给建议。流程：子代理开发构建 → 迁移为「项目根/dsh-plugins/<name>」独立 git 仓库 → 功能完成即提交（英文 Conventional Commit）→ 自动热挂载（本会话立即可用）→ 登记（/forge status 可查）。子代理自动检测重复：已存在则拒绝新建并返回 existingName，改用 update=true 迭代。install:true 装入 profile。耗时数分钟、需网络。',
+    description: '按需生成 DSH 插件（agent 自迭代）：执行任务时若缺少所需工具、只能手工重复处理、或发现值得固化的功能（且规模合适），应调用本工具生成插件（无需用户要求），并将其视为任务的一部分而非仅给出建议。流程：子代理开发构建 → 迁移为「项目根/dsh-plugins/<name>」独立 git 仓库 → 功能完成即提交（英文 Conventional Commit）→ 自动热挂载（本会话立即可用）→ 登记（/forge status 可查）。子代理自动检测重复：已存在则拒绝新建并返回 existingName，改用 update=true 迭代。install:true 装入 profile。耗时数分钟、需网络。',
     parameters: {
       requirement: {
         type: 'string',
@@ -683,7 +682,7 @@ export function registerForgeTool(ctx: Context, config: ForgeConfig): () => void
         startChild,
         logger: ctx.logger,
       })
-      // 无缝切换（默认开启）：生成成功后把新插件热挂载到当前运行时（无需重启）。
+      // 热挂载（默认开启）：生成成功后挂载到当前运行时（无需重启）。
       // 热挂载失败不阻塞交付（已提交的仓库始终可用），仅返回 hotDetail 提示。
       if (args.hot !== false && result.ok && result.migratedTo !== undefined) {
         const mount = await mountPlugin(ctx, result.migratedTo)

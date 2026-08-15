@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/csiroqa/dsh-plugin-forge/actions/workflows/ci.yml/badge.svg)](https://github.com/csiroqa/dsh-plugin-forge/actions/workflows/ci.yml)
 
-AI-native 的 DSH 插件锻造厂。`forge_plugin` 工具让 AI 自主闭环：**主动使用是 AI 的默认工作方式**——执行任务中一旦发现能力缺口或重复劳动，立即调用（调用是任务的一部分，不只给建议）→ 子代理开发 → 迁移为项目根 `/dsh-plugins/<name>` 独立 git 仓库（功能完成即英文 Conventional Commit）→ 自动热挂载本会话即用。人类只需自然表达需求，无需提及"插件"。
+AI-native 的 DSH 插件生成工具。`forge_plugin` 让 AI 在执行任务时自行判断能力缺口：缺少所需工具、只能手工重复处理、或发现可跨会话复用的功能时，生成插件补齐（而非仅给出建议）→ 子代理开发 → 迁移为项目根 `/dsh-plugins/<name>` 独立 git 仓库（功能完成即英文 Conventional Commit）→ 自动热挂载，本会话内即可使用。人类只需自然表达需求，无需提及"插件"。
 
 English: [README.en.md](README.en.md)
 
@@ -73,5 +73,5 @@ node scripts/llm-e2e-host.mjs run <name> <stagingDir> <targetRoot> <harnessRoot>
 ## 安全
 
 - forge 会启动子代理、联网 pnpm install、在目标目录构建、执行 git commit——只传可信需求
-- 提交前检查 diff、.gitignore 兜底、不自动 push/tag/release
+- 提交前检查 diff、.gitignore 排除构建产物与依赖、不自动 push/tag/release
 - 子代理只写 staging（工作区内）

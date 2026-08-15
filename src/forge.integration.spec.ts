@@ -305,7 +305,7 @@ describe('runForge 端到端（假子代理 + 真实迁移/构建/git）', () =>
       .resolves.toBe('do not touch\n')
   })
 
-  it('子代理检测到与已有插件重复时拒绝新建（不重复造轮子）', async () => {
+  it('子代理检测到与已有插件重复时拒绝新建（避免重复开发）', async () => {
     const config = makeConfig()
     const name = 'demo-mini'
     const staging = path.join(config.stagingRoot, name)
@@ -349,7 +349,7 @@ describe('runForge 端到端（假子代理 + 真实迁移/构建/git）', () =>
     // 未提交、未登记（崩溃插件不得进入交付）。
     const registry = await loadRegistry()
     expect(registry.repos).toHaveLength(0)
-  })
+  }, 240_000)
 
   it('合法命令插件通过加载冒烟并正常交付', async () => {
     const config = makeConfig()

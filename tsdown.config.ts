@@ -1,5 +1,5 @@
 /**
- * plugin-forge — DSH 插件锻造厂。
+ * plugin-forge — DSH 插件生成工具。
  *
  * 纯 host 半区插件（无浏览器 UI）：构建产出
  *  - lib/index.js   host 半区（Node ESM：forge_plugin 工具 + /forge status 命令）

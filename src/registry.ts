@@ -1,4 +1,4 @@
-/** 锻造仓库登记表（$DSH_HOME/plugin-forge.json），原子写入。 */
+/** 插件登记表（$DSH_HOME/plugin-forge.json），原子写入。 */
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { dshHome, samePath } from './utils.ts'
@@ -15,7 +15,7 @@ export interface ForgeRepoEntry {
   readonly lastCommitAt?: string
   /** 累计提交次数。 */
   readonly commitCount: number
-  /** 子代理 REPORT 的中文功能摘要（用于引导节"已有插件"清单，避免重复造轮子）。 */
+  /** 子代理 REPORT 的中文功能摘要（用于引导节"已有插件"清单，避免重复开发）。 */
   readonly summaryZh?: string
 }
 

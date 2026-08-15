@@ -1,5 +1,5 @@
 /**
- * DSH 插件锻造厂（host 半区）：forge_plugin 工具 + /forge status + 自迭代引导。
+ * DSH 插件生成工具（host 半区）：forge_plugin 工具 + /forge status + 自迭代引导。
  * AI 原生：AI 自发判断缺口 → 子代理开发 → 独立仓库交付 → 自动热挂载。
  */
 import type { Context } from '@deepseek-ai/cordis'

@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/csiroqa/dsh-plugin-forge/actions/workflows/ci.yml/badge.svg)](https://github.com/csiroqa/dsh-plugin-forge/actions/workflows/ci.yml)
 
-An AI-native plugin forge for DeepSeek Harness (DSH). The `forge_plugin` tool closes an autonomous AI loop: **proactive use is the AI's default way of working** — the moment it hits a capability gap or repetitive manual work while executing a task, it calls the forge immediately (calling is part of the task, not advice) → a subagent builds the plugin → it is migrated to an independent git repo under the project root `/dsh-plugins/<name>` (committed on completion, English Conventional Commit) → hot-mounted into the current runtime, usable immediately. Humans only express needs naturally; no mention of "plugin" required.
+An AI-native plugin generator for DeepSeek Harness (DSH). The `forge_plugin` tool lets the AI judge capability gaps while executing tasks: when a needed tool is missing, work can only be done by hand repeatedly, or a reusable cross-session feature is found, it generates a plugin to fill the gap (instead of only giving advice) → a subagent builds it → the plugin is migrated to an independent git repo under the project root `/dsh-plugins/<name>` (committed on completion, English Conventional Commit) → hot-mounted into the current runtime, usable immediately in the session. Humans only express needs naturally; no mention of "plugin" required.
 
 中文: [README.md](README.md)
 
@@ -23,7 +23,7 @@ Pipeline: staging (workspace `/.forge-staging`) → subagent develops and verifi
 
 `/forge status`: lists forged repos (HEAD, working-tree state, commit count).
 
-## No wheel reinvention
+## Avoiding duplicates
 
 The guidance section does not inject the plugin list (saves context). The subagent self-checks before developing: it reads the registry and the `dsh-plugins` directory; if the requirement duplicates an existing plugin it reports `duplicate_of`, the host refuses to create a new repo and returns `existingName` — iterate with `update=true` instead.
 
