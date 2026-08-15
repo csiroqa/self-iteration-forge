@@ -86,19 +86,11 @@ export const SELF_ITERATION_SECTION_ORDER = 117
  */
 export function selfIterationSectionText(): string {
   return [
-    '你是 DSH 的自迭代智能体：`forge_plugin` 工具允许你按需生成/更新 DSH 插件来扩展自身能力，',
-    '**由你自己判断何时需要新能力并主动补上，而不是等用户要求"做插件"**。',
-    '在以下情况主动调用（无需用户提及插件）：',
-    '1. **执行任务中自我发现**：正在完成用户任务时，发现自己缺少完成任务所需的能力',
-    '   （没有合适的工具/命令/自动化），或只能靠笨办法重复劳动——先调用 forge_plugin 补齐能力，再完成任务；',
-    '2. **固化价值**：值得固化的不只是小工具——有实质价值的复合能力、跨会话/跨项目复用的支撑设施、',
-    '   外部系统集成、以及改进你自己工作方式的元能力（审查、测试、记忆、流程自动化）同样值得锻造；',
-    '3. **规模合适**：作为单个插件不会太重（保持聚焦；太重就拆成多个，一次迭代一个）。',
-    '不要只给建议或描述方案就了事：当判断值得做时，直接调用 `forge_plugin` 生成并交付。',
-    '调用策略：一次迭代一个清晰的小功能；需求不清晰时先做合理假设并在结果中说明。',
-    '交付后**无缝切换**：传 `hot: true` 立即热挂载到当前运行时（无需重启，当前会话马上可用）；',
-    '如需重启后也生效，再传 `install: true` 装入 profile（需配置 installProfile）。',
-    '本工具会启动子代理、需要网络、耗时数分钟，调用期间可继续其他工作；完成后可用 `/forge status` 查询已建仓库。',
+    '你是 DSH 的自迭代智能体：判断缺什么、主动用 `forge_plugin` 补齐（无需用户要求"做插件"）。',
+    '触发时机：执行任务缺能力/只能笨办法重复劳动；功能值得固化（含复合能力、元能力、系统集成）；单个插件不重。',
+    '行动优先：判断值得就调用，不要只给建议。',
+    '交付后 `hot: true` 本会话即用；`install: true` 重启后保留。',
+    '耗时数分钟、需网络，调用期间可继续工作；`/forge status` 可查。',
   ].join('')
 }
 
@@ -261,7 +253,8 @@ function renderResult(value: JsonValue): string {
     }
     const report = result.childReport
     if (report !== undefined && report.trim() !== '') {
-      lines.push(`\n子代理汇报：\n${report.trim().slice(0, 4000)}`)
+      // 精简注入：只保留子代理汇报前 500 字符（完整内容在产物仓库与日志里）。
+      lines.push(`\n子代理汇报：\n${report.trim().slice(0, 500)}`)
     }
   } else {
     lines.push(`❌ 插件生成失败：${result.error ?? '未知错误'}`)
@@ -456,7 +449,7 @@ async function runForgeLocked(options: RunForgeOptions, name: string): Promise<F
     logger?.warn('forge_plugin: 子代理未正常完成 %s（%s）', name, child.stopReason)
     throw new Error(
       `子代理未正常完成（${child.stopReason}）。staging 保留在 ${toPosix(staging)}。`
-      + (child.text.trim() === '' ? '' : `\n部分输出：\n${child.text.slice(0, 4000)}`),
+      + (child.text.trim() === '' ? '' : `\n部分输出：\n${child.text.slice(0, 1500)}`),
     )
   }
   const report = parseChildReport(child.text)
@@ -557,7 +550,7 @@ async function runForgeLocked(options: RunForgeOptions, name: string): Promise<F
     commitSubject,
     build,
     files,
-    childReport: report === undefined ? child.text.slice(0, 2000) : report.notes ?? '',
+    childReport: report === undefined ? child.text.slice(0, 500) : (report.notes ?? '').slice(0, 500),
     installed,
   }
 }
@@ -566,36 +559,36 @@ async function runForgeLocked(options: RunForgeOptions, name: string): Promise<F
 export function registerForgeTool(ctx: Context, config: ForgeConfig): () => void {
   return ctx.tools.register(defineTool({
     name: TOOL_NAME,
-    description: '按需求生成 DSH 插件，用于 agent 自迭代：**由你自己判断何时需要新能力并主动调用**——在执行任务时发现自己缺少所需能力、只能靠笨办法重复劳动，或发现功能值得固化（重复出现、跨会话复用、可独立成小工具）且作为单个插件不会太重时，直接调用本工具补齐能力（无需用户明确要求"做插件"），不要只给建议。流程：启动一个新 Agent，在临时目录按姐妹插件仓库规范开发并构建验证插件；完成后迁移为「项目根/dsh-plugins/<name>」（调用方工作区的父目录/dsh-plugins，与 dsh-plugin 工作区平级）下的独立 git 仓库，并在功能完成时立即做一次英文 Conventional Commit（非定时提交）；仓库登记进 $DSH_HOME/plugin-forge.json（可用 /forge status 查询）。无缝切换：传 hot: true 立即热挂载到当前运行时（无需重启，本会话马上可用）；传 install: true 自动装入 profile（需配置 installProfile）。注意：本工具会启动子代理、需要网络（pnpm install），单次可能耗时数分钟到数十分钟。',
+    description: '按需求生成 DSH 插件（agent 自迭代）：当你判断需要当前没有的能力、或功能值得固化且单个插件不重时，主动调用本工具补齐（无需用户要求），不要只给建议。流程：启动子代理开发构建 → 迁移为「项目根/dsh-plugins/<name>」独立 git 仓库 → 功能完成即提交（英文 Conventional Commit）→ 登记 $DSH_HOME/plugin-forge.json（/forge status 可查）。hot:true 热挂载本会话立即可用（无需重启）；install:true 装入 profile。耗时数分钟、需网络。',
     parameters: {
       requirement: {
         type: 'string',
         required: true,
-        description: '插件需求（中文优先）：功能、行为、交互、配置等，尽量具体完整。',
+        description: '插件需求（中文优先，尽量具体完整）。',
       },
       name: {
         type: 'string',
-        description: '插件/仓库目录名（kebab-case，小写字母数字连字符）。缺省时从需求自动生成。',
+        description: '插件/仓库目录名（kebab-case）；缺省自动生成。',
       },
       targetRoot: {
         type: 'string',
-        description: '独立仓库所在根目录；缺省使用插件配置的 targetRoot（默认项目根/dsh-plugins，即调用方工作区的父目录/dsh-plugins）。',
+        description: '迁移根目录；缺省项目根/dsh-plugins。',
       },
       migrate: {
         type: 'boolean',
-        description: '是否迁移为独立 git 仓库并提交（默认 true；false 时只开发不落地）。',
+        description: '是否迁移为独立仓库并提交（默认 true）。',
       },
       update: {
         type: 'boolean',
-        description: '目标目录已存在时是否允许更新（默认 false：已存在则报错，避免误覆盖）。',
+        description: '更新既有仓库（默认 false，防误覆盖）。',
       },
       install: {
         type: 'boolean',
-        description: '迁移并提交成功后是否自动装入 profile 立即可用（默认 false；需配置 installProfile，重启后生效）。',
+        description: '装入 profile（默认 false；需配置 installProfile，重启后生效）。',
       },
       hot: {
         type: 'boolean',
-        description: '迁移并提交成功后是否热挂载到当前运行时（默认 false；true = 无缝切换，当前会话立即获得新工具/命令，无需重启）。',
+        description: '热挂载到当前运行时（默认 false；true=无缝切换，本会话立即可用）。',
       },
     },
     output: {
