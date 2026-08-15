@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/csiroqa/dsh-plugin-forge/actions/workflows/ci.yml/badge.svg)](https://github.com/csiroqa/dsh-plugin-forge/actions/workflows/ci.yml)
 
-AI-native 的 DSH 插件锻造厂。`forge_plugin` 工具让 AI 自主闭环：执行任务中发现能力缺口 → 自发调用 → 子代理开发 → 迁移为项目根 `/dsh-plugins/<name>` 独立 git 仓库（功能完成即英文 Conventional Commit）→ 自动热挂载本会话即用。人类只需自然表达需求，无需提及"插件"。
+AI-native 的 DSH 插件锻造厂。`forge_plugin` 工具让 AI 自主闭环：**主动使用是 AI 的默认工作方式**——执行任务中一旦发现能力缺口或重复劳动，立即调用（调用是任务的一部分，不只给建议）→ 子代理开发 → 迁移为项目根 `/dsh-plugins/<name>` 独立 git 仓库（功能完成即英文 Conventional Commit）→ 自动热挂载本会话即用。人类只需自然表达需求，无需提及"插件"。
 
 English: [README.en.md](README.en.md)
 

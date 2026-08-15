@@ -67,14 +67,14 @@ export interface ForgeConfig {
 /** 自迭代引导 section 的渲染顺序（紧随 tool-subagent 的 116.5 之后）。 */
 export const SELF_ITERATION_SECTION_ORDER = 117
 
-/** 自迭代引导节（systemPrompt section，随每次提示词组装渲染；不注入已有插件清单，重复检测由子代理完成）。 */
+/** 自迭代引导节（systemPrompt section，随每次提示词组装渲染）。 */
 export function selfIterationSectionText(): string {
   return [
-    '你是 DSH 的自迭代智能体：判断缺什么、主动用 `forge_plugin` 补齐（无需用户要求"做插件"）。',
-    '触发时机：执行任务缺能力/只能笨办法重复劳动；功能值得固化（含复合能力、元能力、系统集成）；单个插件不重。',
-    '行动优先：判断值得就调用，不要只给建议。',
-    '交付后自动热挂载（本会话立即可用，无需重启）；`install: true` 可装入 profile 持久化。耗时数分钟、需网络；`/forge status` 可查。',
-    '重复检测由子代理自动完成：已存在的能力会用 update=true 迭代，不会重复新建。',
+    '你是 DSH 的自迭代智能体。`forge_plugin` 按需造插件扩展你的能力，**主动使用它是你的默认工作方式**：',
+    '- 执行任务时发现缺工具/命令、只能笨办法重复劳动、或功能值得固化（且单个插件不重）——**立即调用** forge_plugin 补齐，这是完成任务的一部分，不是额外动作；',
+    '- 不要将就完成、不要只给建议；判断值得就直接做。',
+    '- 交付后自动热挂载，本会话即用；能力永久保留、跨会话复用。',
+    '- 遇到阻碍时先自问：这个能力我有没有？没有就造。重复需求用 update=true，子代理自动检测重复。',
   ].join('')
 }
 
@@ -587,7 +587,7 @@ async function runForgeLocked(options: RunForgeOptions, name: string): Promise<F
 export function registerForgeTool(ctx: Context, config: ForgeConfig): () => void {
   return ctx.tools.register(defineTool({
     name: TOOL_NAME,
-    description: '按需求生成 DSH 插件（agent 自迭代）：当你判断需要当前没有的能力、或功能值得固化且单个插件不重时，主动调用本工具补齐（无需用户要求），不要只给建议。流程：启动子代理开发构建 → 迁移为「项目根/dsh-plugins/<name>」独立 git 仓库 → 功能完成即提交（英文 Conventional Commit）→ **自动热挂载到当前运行时（本会话立即可用，无需重启）** → 登记 $DSH_HOME/plugin-forge.json（/forge status 可查）。子代理会自动检测与已有插件的重复：重复时拒绝新建并返回 existingName，改用 update=true 迭代。install:true 可装入 profile 持久化。耗时数分钟、需网络。',
+    description: '按需生成 DSH 插件（agent 自迭代）：执行任务中一旦需要缺失的能力、只能笨办法重复劳动、或功能值得固化且单个插件不重，立即调用本工具补齐——主动使用是默认工作方式，调用它是完成任务的一部分，不要将就、不要只给建议。流程：子代理开发构建 → 迁移为「项目根/dsh-plugins/<name>」独立 git 仓库 → 功能完成即提交（英文 Conventional Commit）→ 自动热挂载（本会话立即可用）→ 登记（/forge status 可查）。子代理自动检测重复：已存在则拒绝新建并返回 existingName，改用 update=true 迭代。install:true 装入 profile。耗时数分钟、需网络。',
     parameters: {
       requirement: {
         type: 'string',

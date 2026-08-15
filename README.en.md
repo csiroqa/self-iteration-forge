@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/csiroqa/dsh-plugin-forge/actions/workflows/ci.yml/badge.svg)](https://github.com/csiroqa/dsh-plugin-forge/actions/workflows/ci.yml)
 
-An AI-native plugin forge for DeepSeek Harness (DSH). The `forge_plugin` tool closes an autonomous AI loop: the agent spots a capability gap while executing a task → calls the forge spontaneously → a subagent builds the plugin → it is migrated to an independent git repo under the project root `/dsh-plugins/<name>` (committed on completion, English Conventional Commit) → hot-mounted into the current runtime, usable immediately. Humans only express needs naturally; no mention of "plugin" required.
+An AI-native plugin forge for DeepSeek Harness (DSH). The `forge_plugin` tool closes an autonomous AI loop: **proactive use is the AI's default way of working** — the moment it hits a capability gap or repetitive manual work while executing a task, it calls the forge immediately (calling is part of the task, not advice) → a subagent builds the plugin → it is migrated to an independent git repo under the project root `/dsh-plugins/<name>` (committed on completion, English Conventional Commit) → hot-mounted into the current runtime, usable immediately. Humans only express needs naturally; no mention of "plugin" required.
 
 中文: [README.md](README.md)
 
