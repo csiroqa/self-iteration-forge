@@ -4,9 +4,7 @@
 
 AI-native DSH 插件生成器。`forge_plugin` 由 AI 在执行任务时调用：子代理开发 → 迁移为「项目根/dsh-plugins/<name>」独立 git 仓库（功能完成即英文 Conventional Commit）→ 热挂载当前会话。
 
-## 自举
-
-借由一切皆插件的 DSH 理念与智能体自迭代，本仓库已实现自举：`forge_plugin` 产出的插件（如 dsh-code-review）反过来审查生成器自身的源码，多轮修复提交由该审查驱动（如 9c50e31、07dc333、5feeff8）。
+借由一切皆插件理念的智能体自迭代探索，现已实现自举（？
 
 English: [README.en.md](README.en.md)
 
