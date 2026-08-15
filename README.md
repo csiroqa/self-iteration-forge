@@ -87,6 +87,7 @@ AI：调用 forge_plugin(requirement=..., name="session-auto-archive", update=tr
 - 迁移后目标目录重新 `pnpm install && pnpm build`
 - 校验 `package.json` 的 `main` / `types` 指向的文件真实存在（防 `.mjs` 与声明不一致）
 - 校验没有写成 registry 版本号的 `@deepseek-ai/*` 依赖（必须 `link:` 指向本地 deepseek-harness）
+- **加载冒烟**：用真实 cordis Context + 复刻 dsh-commands/dsh-tools 加载校验的假服务执行插件 `apply`，拦截"构建通过但启动即崩"的 apply 期错误（如命令 `input.hint` 为空——真实事故：session-notes 曾导致 dsh 重启失败；inject 非 commands/tools 的插件跳过，由构建层兜底）
 - 幂等补齐 `.gitignore`；提交前检查 diff；commit subject 按 Conventional Commits ≤72 字符清洗
 
 ## 配置

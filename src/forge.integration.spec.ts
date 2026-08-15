@@ -31,9 +31,11 @@ function fakeChild(options: {
   removeFromStaging?: readonly string[]
   /** 模拟子代理检测到与已有插件重复：不写任何文件，REPORT 报告 duplicate_of。 */
   duplicateOf?: string
+  /** 命令插件模式：'good' = 合法命令；'bad-hint' = input.hint 为空（构建能过但加载即崩）。 */
+  commandMode?: 'good' | 'bad-hint'
 }): StartChild {
   return async () => {
-    const { staging, harnessRoot: harness, variation = 1, removeFromStaging = [], duplicateOf } = options
+    const { staging, harnessRoot: harness, variation = 1, removeFromStaging = [], duplicateOf, commandMode } = options
     if (duplicateOf !== undefined) {
       // 重复检测路径：不开发任何文件。
       return {
@@ -56,6 +58,47 @@ function fakeChild(options: {
       }
     }
     await mkdir(path.join(staging, 'src'), { recursive: true })
+    // 命令插件的 apply 主体：'bad-hint' 复刻 session-notes 事故（hint 为空）。
+    const commandBody = commandMode === undefined ? undefined : commandMode === 'good'
+      ? [
+          "import type { Context } from '@deepseek-ai/cordis'",
+          "import type {} from '@deepseek-ai/dsh-commands'",
+          "export const name = 'demo-mini'",
+          "export const inject = ['commands']",
+          'export function apply(ctx: Context): void {',
+          '  ctx.commands.register({',
+          "    name: 'notes-status',",
+          "    description: '显示状态',",
+          "    input: { hint: 'status' },",
+          '    handler: () => ({ kind: "success", text: "ok" }),',
+          '  })',
+          '}',
+          '',
+        ]
+      : [
+          "import type { Context } from '@deepseek-ai/cordis'",
+          "import type {} from '@deepseek-ai/dsh-commands'",
+          "export const name = 'demo-mini'",
+          "export const inject = ['commands']",
+          'export function apply(ctx: Context): void {',
+          '  ctx.commands.register({',
+          "    name: 'notes-status',",
+          "    description: '显示状态',",
+          "    input: { hint: '' },",
+          '    handler: () => ({ kind: "success", text: "ok" }),',
+          '  })',
+          '}',
+          '',
+        ]
+    const indexSource = commandBody ?? [
+      '/** 最小示例插件。 */',
+      "import type { Context } from '@deepseek-ai/cordis'",
+      "export const name = 'demo-mini'",
+      'export function apply(ctx: Context): void {',
+      '  void ctx',
+      '}',
+      '',
+    ]
     await writeFile(path.join(staging, 'package.json'), JSON.stringify({
       name: '@dsh-external/demo-mini',
       version: '0.1.0',
@@ -66,21 +109,16 @@ function fakeChild(options: {
       scripts: { build: 'tsdown' },
       dependencies: {
         '@deepseek-ai/cordis': `link:${relativeLink(staging, path.join(harness, 'vendor/cordis'))}`,
+        ...(commandMode !== undefined
+          ? { '@deepseek-ai/dsh-commands': `link:${relativeLink(staging, path.join(harness, 'packages/interaction/commands'))}` }
+          : {}),
       },
       devDependencies: {
         tsdown: '^0.22.14',
         typescript: '^5.9.3',
       },
     }, null, 2))
-    await writeFile(path.join(staging, 'src', 'index.ts'), [
-      '/** 最小示例插件。 */',
-      "import type { Context } from '@deepseek-ai/cordis'",
-      "export const name = 'demo-mini'",
-      'export function apply(ctx: Context): void {',
-      '  void ctx',
-      '}',
-      '',
-    ].join('\n'))
+    await writeFile(path.join(staging, 'src', 'index.ts'), indexSource.join('\n'))
     await writeFile(path.join(staging, 'tsdown.config.ts'), [
       "import type { UserConfig } from 'tsdown'",
       'const config: UserConfig = {',
@@ -91,7 +129,7 @@ function fakeChild(options: {
       "  platform: 'node',",
       "  fixedExtension: false,",
       "  dts: true,",
-      "  deps: { neverBundle: ['@deepseek-ai/cordis'] },",
+      "  deps: { neverBundle: ['@deepseek-ai/cordis', '@deepseek-ai/dsh-commands'] },",
       '}',
       'export default config',
       '',
@@ -293,4 +331,43 @@ describe('runForge 端到端（假子代理 + 真实迁移/构建/git）', () =>
     const registry = await loadRegistry()
     expect(registry.repos).toHaveLength(0)
   })
+
+  it('加载冒烟拦截"构建通过但启动即崩"的插件（session-notes 事故复现）', async () => {
+    const config = makeConfig()
+    const name = 'demo-mini'
+    const staging = path.join(config.stagingRoot, name)
+
+    // 假子代理产出 input.hint 为空的命令插件：typecheck/build 全过，但 apply 即崩。
+    await expect(runForge({
+      config,
+      workspace: REPO_ROOT,
+      harnessRoot,
+      args: { requirement: '做一个命令插件', name },
+      signal: new AbortController().signal,
+      startChild: fakeChild({ staging, harnessRoot, commandMode: 'bad-hint' }),
+    })).rejects.toThrow(/加载冒烟未通过/)
+    // 未提交、未登记（崩溃插件不得进入交付）。
+    const registry = await loadRegistry()
+    expect(registry.repos).toHaveLength(0)
+  })
+
+  it('合法命令插件通过加载冒烟并正常交付', async () => {
+    const config = makeConfig()
+    const name = 'demo-mini'
+    const staging = path.join(config.stagingRoot, name)
+    const target = path.join(config.targetRoot, name)
+
+    const result = await runForge({
+      config,
+      workspace: REPO_ROOT,
+      harnessRoot,
+      args: { requirement: '做一个命令插件', name },
+      signal: new AbortController().signal,
+      startChild: fakeChild({ staging, harnessRoot, commandMode: 'good' }),
+    })
+    expect(result.ok).toBe(true)
+    expect(result.committed).toBe(true)
+    expect(snapshotJsonValue(result)).toBeDefined()
+    await expect(stat(path.join(target, '.git'))).resolves.toBeDefined()
+  }, 240_000)
 })

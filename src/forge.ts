@@ -29,6 +29,7 @@ import path from 'node:path'
 import { commitStaged, ensureGitRepo, stageAll } from './git.ts'
 import { mountPlugin } from './hotmount.ts'
 import { copyInto, ensureGitignore, pathExists, rewriteCiHarnessPaths, rewriteHarnessLinks, syncRemoveStale } from './migrate.ts'
+import { verifyPluginLoad } from './verify-load.ts'
 import { buildChildPrompt } from './prompt.ts'
 import { loadRegistry, upsertRepo, type ForgeRepoEntry } from './registry.ts'
 import {
@@ -543,6 +544,16 @@ async function runForgeLocked(options: RunForgeOptions, name: string): Promise<F
         `迁移后构建验证失败：${build}\nstaging 保留在 ${toPosix(staging)}，目标目录为 ${toPosix(migratedTo)}。`
         + ' 请检查 link 路径改写或依赖；修复后可对目标目录重试 pnpm install && pnpm build，'
         + ' 重试 forge 时请带 update=true（目标目录已存在）。',
+      )
+    }
+    // 加载冒烟：构建通过不等于能加载——apply 期错误（如命令 input.hint 为空）
+    // 会让 DSH 重启时整个插件树崩溃（真实事故：session-notes）。此处拦截。
+    const load = await verifyPluginLoad(migratedTo)
+    if (!load.ok) {
+      logger?.warn('forge_plugin: 加载冒烟未通过 %s：%s', name, load.detail ?? '')
+      throw new Error(
+        `加载冒烟未通过（该插件可能导致 DSH 启动崩溃，已阻止交付）：${load.detail ?? ''}`
+        + `\n请修复 apply 期错误后重试（staging 保留在 ${toPosix(staging)}，目标目录为 ${toPosix(migratedTo)}，重试带 update=true）。`,
       )
     }
     // 功能完成 → 立即提交（非定时）；提交前 stageAll 已检查 diff。
