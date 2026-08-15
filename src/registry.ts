@@ -21,6 +21,8 @@ export interface ForgeRepoEntry {
   readonly lastCommitAt?: string
   /** 累计提交次数。 */
   readonly commitCount: number
+  /** 子代理 REPORT 的中文功能摘要（用于引导节"已有插件"清单，避免重复造轮子）。 */
+  readonly summaryZh?: string
 }
 
 /** 登记表文件结构（version 便于日后迁移）。 */
@@ -39,6 +41,7 @@ function isEntry(value: unknown): value is ForgeRepoEntry {
     && typeof entry.createdAt === 'string'
     && (entry.lastCommitAt === undefined || typeof entry.lastCommitAt === 'string')
     && typeof entry.commitCount === 'number'
+    && (entry.summaryZh === undefined || typeof entry.summaryZh === 'string')
 }
 
 /** 读取登记表；文件不存在时返回空表。 */

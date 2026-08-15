@@ -82,15 +82,17 @@ export const SELF_ITERATION_SECTION_ORDER = 117
 
 /**
  * 面向 agent 的自迭代策略（systemPrompt section，随每次提示词组装渲染）。
- * 让 agent 在需要新能力时**自发**调用 forge_plugin，而不是等用户明确要求。
+ * 保持精简：不注入"已有插件清单"（避免无谓上下文开销）——重复检测由
+ * forge 子代理在开发前完成（读 registry + dsh-plugins 目录），重复时
+ * 宿主拒绝新建并建议 update=true。
  */
 export function selfIterationSectionText(): string {
   return [
     '你是 DSH 的自迭代智能体：判断缺什么、主动用 `forge_plugin` 补齐（无需用户要求"做插件"）。',
     '触发时机：执行任务缺能力/只能笨办法重复劳动；功能值得固化（含复合能力、元能力、系统集成）；单个插件不重。',
     '行动优先：判断值得就调用，不要只给建议。',
-    '交付后 `hot: true` 本会话即用；`install: true` 重启后保留。',
-    '耗时数分钟、需网络，调用期间可继续工作；`/forge status` 可查。',
+    '交付后 `hot: true` 本会话即用；`install: true` 重启后保留。耗时数分钟、需网络；`/forge status` 可查。',
+    '重复检测由子代理自动完成：已存在的能力会用 update=true 迭代，不会重复新建。',
   ].join('')
 }
 
@@ -120,6 +122,10 @@ export interface ChildReport {
   test?: string
   files?: string
   notes?: string
+  /** 子代理检测到需求与已有插件重复时，填已有插件名（此时不开发）。 */
+  duplicateOf?: string
+  /** 重复检测说明（重叠点/差异）。 */
+  duplicateNote?: string
 }
 
 /** forge_plugin 的调用参数（经 schema 校验后）。 */
@@ -152,6 +158,10 @@ export interface ForgeToolResult {
   readonly hotMounted?: boolean
   /** 热挂载失败原因（hot: true 但未能挂载时）。 */
   readonly hotDetail?: string
+  /** 子代理检测到重复、未新建（true 时建议用 update=true 迭代既有插件）。 */
+  readonly duplicated?: boolean
+  /** 重复检测命中的已有插件名。 */
+  readonly existingName?: string
 }
 
 /** 子代理启动请求（runForge 注入点）。 */
@@ -204,6 +214,8 @@ export function parseChildReport(text: string): ChildReport | undefined {
     else if (key === 'test') report.test = value
     else if (key === 'files') report.files = value
     else if (key === 'notes') report.notes = value
+    else if (key === 'duplicate_of') report.duplicateOf = value
+    else if (key === 'duplicate_note') report.duplicateNote = value
   }
   return Object.keys(report).length > 0 ? report : undefined
 }
@@ -238,8 +250,19 @@ function renderResult(value: JsonValue): string {
     installed?: boolean
     hotMounted?: boolean
     hotDetail?: string
+    duplicated?: boolean
+    existingName?: string
   }
   const lines: string[] = []
+  if (result.duplicated === true) {
+    lines.push(`⚠️ 需求与已有插件「${result.existingName ?? '?'}」重复，未新建（不重复造轮子）。`)
+    lines.push(`建议：用 update=true 对「${result.existingName ?? '?'}」做迭代，或调整需求聚焦不同能力。`)
+    const note = result.childReport
+    if (note !== undefined && note.trim() !== '') {
+      lines.push(`检测说明：${note.trim().slice(0, 500)}`)
+    }
+    return lines.join('\n')
+  }
   if (result.ok === true) {
     lines.push(`✅ 插件 ${result.pluginName ?? ''} 已生成。`)
     if (result.migratedTo !== undefined) lines.push(`📦 独立仓库：${result.migratedTo}`)
@@ -454,6 +477,21 @@ async function runForgeLocked(options: RunForgeOptions, name: string): Promise<F
   }
   const report = parseChildReport(child.text)
 
+  // 3.5 重复检测：子代理发现需求与已有插件重复时，拒绝新建（不重复造轮子）。
+  if (report?.duplicateOf !== undefined && report.duplicateOf.trim() !== '') {
+    logger?.info('forge_plugin: 检测到与已有插件重复 %s → %s，未新建', name, report.duplicateOf.trim())
+    return {
+      ok: true,
+      pluginName: name,
+      committed: false,
+      build: 'skipped',
+      files: [],
+      duplicated: true,
+      existingName: report.duplicateOf.trim(),
+      childReport: (report.duplicateNote ?? '').slice(0, 500),
+    }
+  }
+
   // 4. 文件清单。
   const files = await listRelativeFiles(staging)
   if (files.length === 0) {
@@ -514,6 +552,7 @@ async function runForgeLocked(options: RunForgeOptions, name: string): Promise<F
       createdAt: previous?.createdAt ?? new Date().toISOString(),
       lastCommitAt: committed ? new Date().toISOString() : previous?.lastCommitAt,
       commitCount: (previous?.commitCount ?? 0) + (committed ? 1 : 0),
+      summaryZh: report?.summaryZh?.slice(0, 60) ?? previous?.summaryZh,
     }
     await upsertRepo(entry)
     // push 默认关闭（AGENTS.md：不自动 push）；仅在配置显式开启时执行。
@@ -559,7 +598,7 @@ async function runForgeLocked(options: RunForgeOptions, name: string): Promise<F
 export function registerForgeTool(ctx: Context, config: ForgeConfig): () => void {
   return ctx.tools.register(defineTool({
     name: TOOL_NAME,
-    description: '按需求生成 DSH 插件（agent 自迭代）：当你判断需要当前没有的能力、或功能值得固化且单个插件不重时，主动调用本工具补齐（无需用户要求），不要只给建议。流程：启动子代理开发构建 → 迁移为「项目根/dsh-plugins/<name>」独立 git 仓库 → 功能完成即提交（英文 Conventional Commit）→ 登记 $DSH_HOME/plugin-forge.json（/forge status 可查）。hot:true 热挂载本会话立即可用（无需重启）；install:true 装入 profile。耗时数分钟、需网络。',
+    description: '按需求生成 DSH 插件（agent 自迭代）：当你判断需要当前没有的能力、或功能值得固化且单个插件不重时，主动调用本工具补齐（无需用户要求），不要只给建议。流程：启动子代理开发构建 → 迁移为「项目根/dsh-plugins/<name>」独立 git 仓库 → 功能完成即提交（英文 Conventional Commit）→ 登记 $DSH_HOME/plugin-forge.json（/forge status 可查）。子代理会自动检测与已有插件的重复：重复时拒绝新建并返回 existingName，改用 update=true 迭代。hot:true 热挂载本会话立即可用（无需重启）；install:true 装入 profile。耗时数分钟、需网络。',
     parameters: {
       requirement: {
         type: 'string',
@@ -608,6 +647,8 @@ export function registerForgeTool(ctx: Context, config: ForgeConfig): () => void
           installed: { type: 'boolean' },
           hotMounted: { type: 'boolean' },
           hotDetail: { type: 'string' },
+          duplicated: { type: 'boolean' },
+          existingName: { type: 'string' },
         },
       },
       render: (_args, value) => [{ type: 'text', text: renderResult(value) }],

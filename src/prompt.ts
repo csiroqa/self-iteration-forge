@@ -103,6 +103,10 @@ deepseek-harness 检出位于 ${toPosix(harnessRoot)}。从交付目录到它的
 
 ## 开发步骤
 
+0. **重复检查（第一步，创建任何文件之前）**：
+   - 读取登记表 $DSH_HOME/plugin-forge.json（若存在，含各插件的中文功能摘要），并列出迁移目标根目录 ${toPosix(targetRoot)} 下的子目录；
+   - 若已有插件的功能与当前需求**重复/高度重叠**：**不要开发任何文件**，在最终 REPORT 中填写 \`duplicate_of: <已有插件名>\` 与 \`duplicate_note: <一句话说明重叠点与差异>\`，然后直接结束（staging 保持为空）；
+   - 若部分重叠但有明确新增价值：正常开发，并在 REPORT 的 \`notes\` 中说明与哪个插件重叠、差异是什么。
 1. 用 read/glob/grep 通读参考仓库与所需 API 源码，确认工具链与格式细节。
 2. 设计插件：功能、注入的服务、配置项、是否需要浏览器半区、注册哪些工具/命令。
 3. 在交付目录创建全部文件（文件清单见「仓库格式」）。
@@ -123,6 +127,8 @@ typecheck: <passed|failed|skipped>
 test: <passed|failed|skipped|none>
 files: <逗号分隔的相对路径清单>
 notes: <补充说明：已知限制、网络使用情况、安装方式建议等>
+duplicate_of: <可选：检测到与已有插件重复时填其名称，此时不开发>
+duplicate_note: <可选：重复检测说明（重叠点/差异）>
 REPORT_END
 
 注意：REPORT 块之外可以自由说明过程；迁移目标（${toPosix(targetRoot)}/${name}）与 git 提交由宿主完成，你不需要关心。`

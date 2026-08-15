@@ -28,9 +28,32 @@ function fakeChild(options: {
   harnessRoot: string
   variation?: number
   removeFromStaging?: readonly string[]
+  /** 模拟子代理检测到与已有插件重复：不写任何文件，REPORT 报告 duplicate_of。 */
+  duplicateOf?: string
 }): StartChild {
   return async () => {
-    const { staging, harnessRoot: harness, variation = 1, removeFromStaging = [] } = options
+    const { staging, harnessRoot: harness, variation = 1, removeFromStaging = [], duplicateOf } = options
+    if (duplicateOf !== undefined) {
+      // 重复检测路径：不开发任何文件。
+      return {
+        stopReason: 'completed' as const,
+        text: [
+          'REPORT_START',
+          'plugin_name: demo-mini',
+          'summary_zh: （重复，未开发）',
+          'summary_en: duplicate detected, nothing built',
+          'requires_client: false',
+          'build: skipped',
+          'typecheck: skipped',
+          'test: skipped',
+          'files: ',
+          'notes: 检测到重复，未创建任何文件',
+          `duplicate_of: ${duplicateOf}`,
+          'duplicate_note: 与既有插件功能高度重叠（同为核心功能），无新增价值',
+          'REPORT_END',
+        ].join('\n'),
+      }
+    }
     await mkdir(path.join(staging, 'src'), { recursive: true })
     await writeFile(path.join(staging, 'package.json'), JSON.stringify({
       name: '@dsh-external/demo-mini',
@@ -239,5 +262,30 @@ describe('runForge 端到端（假子代理 + 真实迁移/构建/git）', () =>
     // 既有文件未被触碰。
     await expect(readFile(path.join(config.targetRoot, name, 'keep.txt'), 'utf8'))
       .resolves.toBe('do not touch\n')
+  })
+
+  it('子代理检测到与已有插件重复时拒绝新建（不重复造轮子）', async () => {
+    const config = makeConfig()
+    const name = 'demo-mini'
+    const staging = path.join(config.stagingRoot, name)
+    const target = path.join(config.targetRoot, name)
+
+    const result = await runForge({
+      config,
+      workspace: REPO_ROOT,
+      harnessRoot,
+      args: { requirement: '做一个最小示例插件', name },
+      signal: new AbortController().signal,
+      startChild: fakeChild({ staging, harnessRoot, duplicateOf: 'existing-demo' }),
+    })
+
+    // 结构化结果：duplicated 且未迁移、未提交、未登记。
+    expect(result.duplicated).toBe(true)
+    expect(result.existingName).toBe('existing-demo')
+    expect(result.ok).toBe(true)
+    expect(result.migratedTo).toBeUndefined()
+    await expect(stat(target)).rejects.toThrow()
+    const registry = await loadRegistry()
+    expect(registry.repos).toHaveLength(0)
   })
 })

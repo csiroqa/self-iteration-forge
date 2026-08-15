@@ -49,6 +49,8 @@ The plugin registers a **self-iteration guidance section** in the system prompt 
 3. **Deliver**: a subagent develops → build verified → migrated to an independent repo → committed on completion
 4. **Seamless switch**: pass `hot: true` to hot-mount into the current runtime — the session gains the new capability immediately (no restart); pass `install: true` as well to persist across restarts
 
+**No wheel reinvention (zero context overhead)**: the guidance section does not inject the existing-plugin list (saves tokens) — instead the **forge subagent self-checks before developing**: it reads `$DSH_HOME/plugin-forge.json` (with Chinese summaries) and the target root directory; if the requirement duplicates/highly overlaps an existing plugin, it builds nothing and reports `duplicate_of` in the REPORT, the host refuses to create a new repo and returns `existingName`, and the caller iterates with `update=true` instead.
+
 ## Self-iteration workflow example (design intent)
 
 ```text

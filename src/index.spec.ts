@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { ensureGitignore, rewriteCiHarnessPaths, rewriteHarnessLinks, syncRemoveStale } from './migrate.ts'
-import { assertNoRegistryHarnessDeps, resolveTargetRoot } from './forge.ts'
+import { assertNoRegistryHarnessDeps, parseChildReport, resolveTargetRoot } from './forge.ts'
 import { commitStaged, ensureGitRepo, stageAll } from './git.ts'
 import { loadRegistry, saveRegistry } from './registry.ts'
 import {
@@ -237,6 +237,31 @@ describe('assertNoRegistryHarnessDeps', () => {
       dependencies: { '@deepseek-ai/cordis': 'link:../deepseek-harness/vendor/cordis' },
     }))
     await expect(assertNoRegistryHarnessDeps(pkgPath, path.join(tempRoot, 'deepseek-harness'))).resolves.toBeUndefined()
+  })
+})
+
+describe('parseChildReport', () => {
+  it('解析重复检测字段 duplicate_of / duplicate_note', () => {
+    const report = parseChildReport([
+      'REPORT_START',
+      'plugin_name: demo',
+      'summary_zh: x',
+      'duplicate_of: existing-demo',
+      'duplicate_note: 功能高度重叠',
+      'REPORT_END',
+    ].join('\n'))
+    expect(report?.duplicateOf).toBe('existing-demo')
+    expect(report?.duplicateNote).toBe('功能高度重叠')
+  })
+
+  it('正常报告不含重复字段', () => {
+    const report = parseChildReport([
+      'REPORT_START',
+      'plugin_name: demo',
+      'summary_zh: x',
+      'REPORT_END',
+    ].join('\n'))
+    expect(report?.duplicateOf).toBeUndefined()
   })
 })
 
