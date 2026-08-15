@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { ensureGitignore, rewriteCiHarnessPaths, rewriteHarnessLinks, syncRemoveStale } from './migrate.ts'
-import { assertNoRegistryHarnessDeps } from './forge.ts'
+import { assertNoRegistryHarnessDeps, resolveTargetRoot } from './forge.ts'
 import { commitStaged, ensureGitRepo, stageAll } from './git.ts'
 import { loadRegistry, saveRegistry } from './registry.ts'
 import {
@@ -237,6 +237,44 @@ describe('assertNoRegistryHarnessDeps', () => {
       dependencies: { '@deepseek-ai/cordis': 'link:../deepseek-harness/vendor/cordis' },
     }))
     await expect(assertNoRegistryHarnessDeps(pkgPath, path.join(tempRoot, 'deepseek-harness'))).resolves.toBeUndefined()
+  })
+})
+
+describe('resolveTargetRoot（迁移目标解析）', () => {
+  const base: Parameters<typeof resolveTargetRoot>[1] = {
+    targetRoot: '',
+    stagingRoot: '',
+    harnessRoot: '',
+    subagentProvider: 'spawn',
+    maxChildDepth: 2,
+    childTimeoutMs: 2_700_000,
+    commitType: 'feat',
+    push: false,
+    gitAuthorName: 'x',
+    gitAuthorEmail: 'y@z',
+    keepStaging: true,
+    referenceRepos: [],
+    stagingTtlDays: 0,
+    installProfile: '',
+  }
+
+  it('默认解析到调用方工作区/dsh-plugins', () => {
+    expect(resolveTargetRoot({ requirement: 'x' }, base, 'D:/work/proj')).toBe(
+      path.join('D:/work/proj', 'dsh-plugins'),
+    )
+  })
+
+  it('配置的 targetRoot 优先于默认', () => {
+    expect(resolveTargetRoot({ requirement: 'x' }, { ...base, targetRoot: 'D:/repos' }, 'D:/work/proj'))
+      .toBe(path.resolve('D:/repos'))
+  })
+
+  it('显式参数优先于配置', () => {
+    expect(resolveTargetRoot(
+      { requirement: 'x', targetRoot: 'D:/explicit' },
+      { ...base, targetRoot: 'D:/repos' },
+      'D:/work/proj',
+    )).toBe(path.resolve('D:/explicit'))
   })
 })
 

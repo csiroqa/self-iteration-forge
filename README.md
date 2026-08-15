@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/csiroqa/dsh-plugin-forge/actions/workflows/ci.yml/badge.svg)](https://github.com/csiroqa/dsh-plugin-forge/actions/workflows/ci.yml)
 
-DeepSeek Harness（DSH）的**插件锻造厂**：为 AI 提供 `forge_plugin` 工具——传入需求后启动一个新 Agent，按姐妹插件仓库的工具链/格式/语言风格（并遵守用户全局 AGENTS.md）开发并构建验证 DSH 插件，完成后迁移为 `D:/2-OGP` 下的独立 git 仓库，并在**功能完成时立即做一次英文 Conventional Commit**（非定时提交）。仓库登记进 `$DSH_HOME/plugin-forge.json`，`/forge status` 可查询。
+DeepSeek Harness（DSH）的**插件锻造厂**：为 AI 提供 `forge_plugin` 工具——传入需求后启动一个新 Agent，按姐妹插件仓库的工具链/格式/语言风格（并遵守用户全局 AGENTS.md）开发并构建验证 DSH 插件，完成后迁移为**调用方工作区 `/dsh-plugins/<name>`** 下的独立 git 仓库，并在**功能完成时立即做一次英文 Conventional Commit**（非定时提交）。仓库登记进 `$DSH_HOME/plugin-forge.json`，`/forge status` 可查询。
 
 English: [README.en.md](README.en.md)
 
@@ -16,7 +16,7 @@ English: [README.en.md](README.en.md)
 | --- | --- | --- |
 | `requirement` | 是 | 插件需求（中文优先）：功能、行为、交互、配置等 |
 | `name` | 否 | 插件/仓库目录名（kebab-case）；缺省时从需求自动生成 |
-| `targetRoot` | 否 | 独立仓库所在根目录；缺省用配置的 `targetRoot`（默认 `D:/2-OGP`） |
+| `targetRoot` | 否 | 独立仓库所在根目录；缺省用配置的 `targetRoot`（默认调用方工作区 `/dsh-plugins`） |
 | `migrate` | 否 | 是否迁移为独立 git 仓库并提交（默认 `true`） |
 | `update` | 否 | 目标目录已存在时是否允许更新（默认 `false`，防误覆盖） |
 | `install` | 否 | 迁移并提交成功后是否自动装入 profile 立即可用（默认 `false`；需配置 `installProfile`，重启后生效） |
@@ -70,7 +70,7 @@ plugin-forge 已创建的插件仓库（1 个）：
 ```text
 你（用户）：做一个插件，把每次会话结束时自动归档到本地文件夹
 AI：调用 forge_plugin(requirement=..., name="session-auto-archive")
-  → 新 Agent 开发、构建验证、迁移到 D:/2-OGP/session-auto-archive、提交
+  → 新 Agent 开发、构建验证、迁移到工作区/dsh-plugins/session-auto-archive、提交
   → 返回：独立仓库 + 提交摘要
 你（用户）：给 session-auto-archive 增加"归档后发送系统通知"功能
 AI：调用 forge_plugin(requirement=..., name="session-auto-archive", update=true)
@@ -93,7 +93,7 @@ AI：调用 forge_plugin(requirement=..., name="session-auto-archive", update=tr
 
 | 键 | 默认 | 说明 |
 | --- | --- | --- |
-| `targetRoot` | `D:/2-OGP` | 独立仓库所在根目录 |
+| `targetRoot` | 空 | 独立仓库所在根目录；留空 = 调用方工作区 `/dsh-plugins` |
 | `stagingRoot` | 空 | 子代理开发暂存根目录；留空 = 调用方工作区 `/.forge-staging` |
 | `harnessRoot` | 空 | deepseek-harness 检出根；留空 = 从工作区向上自动查找 |
 | `subagentProvider` | `spawn` | 子代理 provider 名（base bundle 内置） |
@@ -128,11 +128,11 @@ dsh plugin --profile web add link:D:\2-OGP\plugin-forge   # Windows
 
 1. 在会话中直接对 AI 说需求，AI 会调用 `forge_plugin`（也可在提示词里显式要求调用）
 2. 侧栏输入 `/forge status` 查看已创建的插件仓库与最近提交
-3. 生成的插件在 `D:/2-OGP/<name>`，可像其他姐妹插件一样 `dsh plugin --profile web add link:D:/2-OGP/<name>` 装入使用
+3. 生成的插件在调用方工作区 `/dsh-plugins/<name>`，可像其他姐妹插件一样 `dsh plugin --profile web add link:<工作区>/dsh-plugins/<name>` 装入使用
 
 ## 真实 LLM 实例测试（无需重启 GUI）
 
-在 GUI 重启加载 `forge_plugin` 之前，可用 `scripts/llm-e2e-host.mjs` 用**真实 LLM 子代理**走完整条流水线（子代理 = 会话级 subagent，宿主侧 = 本脚本复用 lib 同一批函数）：
+在 GUI 重启加载 `forge_plugin` 之前，可用 `scripts/llm-e2e-host.mjs` 用**真实 LLM 子代理**走完整条流水线（子代理 = 会话级 subagent，宿主侧 = 本脚本复用 lib 同一批函数）。下方示例显式传了 targetRoot `D:/2-OGP`（演示显式覆盖）；不传时 forge 默认迁移到调用方工作区 `/dsh-plugins`：
 
 ```sh
 # 1) 生成真实子代理提示词（<name> <stagingDir> <targetRoot> <harnessRoot> <requirement>）

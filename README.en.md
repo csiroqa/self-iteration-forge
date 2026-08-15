@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/csiroqa/dsh-plugin-forge/actions/workflows/ci.yml/badge.svg)](https://github.com/csiroqa/dsh-plugin-forge/actions/workflows/ci.yml)
 
-A **plugin forge** for DeepSeek Harness (DSH): exposes the `forge_plugin` tool so an AI can pass a requirement and spawn a fresh agent that builds a DSH plugin following the toolchain/format/language conventions of the sibling plugin repos (plus the user's global AGENTS.md rules), verifies the build, migrates it into an independent git repository under `D:/2-OGP`, and commits immediately once the feature is complete (event-driven, not timer-based). Repos are registered in `$DSH_HOME/plugin-forge.json`; `/forge status` lists them.
+A **plugin forge** for DeepSeek Harness (DSH): exposes the `forge_plugin` tool so an AI can pass a requirement and spawn a fresh agent that builds a DSH plugin following the toolchain/format/language conventions of the sibling plugin repos (plus the user's global AGENTS.md rules), verifies the build, migrates it into an independent git repository under the **caller workspace `/dsh-plugins/<name>`**, and commits immediately once the feature is complete (event-driven, not timer-based). Repos are registered in `$DSH_HOME/plugin-forge.json`; `/forge status` lists them.
 
 中文: [README.md](README.md)
 
@@ -14,7 +14,7 @@ A **plugin forge** for DeepSeek Harness (DSH): exposes the `forge_plugin` tool s
 | --- | --- | --- |
 | `requirement` | yes | Plugin requirement (Chinese preferred): features, behavior, interaction, config |
 | `name` | no | Plugin/repo directory name (kebab-case); auto-derived from the requirement when omitted |
-| `targetRoot` | no | Root directory for independent repos; defaults to the configured `targetRoot` (`D:/2-OGP`) |
+| `targetRoot` | no | Root directory for independent repos; defaults to the configured `targetRoot` (default: caller workspace `/dsh-plugins`) |
 | `migrate` | no | Whether to migrate into an independent git repo and commit (default `true`) |
 | `update` | no | Whether updating an existing target directory is allowed (default `false`, prevents accidental overwrite) |
 | `install` | no | Whether to auto-install into the profile after migration+commit (default `false`; requires `installProfile` config; takes effect after restart) |
@@ -54,7 +54,7 @@ The plugin registers a **self-iteration guidance section** in the system prompt 
 ```text
 You: build a plugin that auto-archives each session to a local folder when it ends
 AI: calls forge_plugin(requirement=..., name="session-auto-archive")
-  → a fresh agent develops, verifies the build, migrates to D:/2-OGP/session-auto-archive, commits
+  → a fresh agent develops, verifies the build, migrates to workspace/dsh-plugins/session-auto-archive, commits
   → returns: repo path + commit summary
 You: add a system notification after archiving in session-auto-archive
 AI: calls forge_plugin(requirement=..., name="session-auto-archive", update=true)
@@ -77,7 +77,7 @@ All keys are optional (defaults live in `src/index.ts`):
 
 | Key | Default | Description |
 | --- | --- | --- |
-| `targetRoot` | `D:/2-OGP` | Root directory for independent repos |
+| `targetRoot` | empty | Root directory for independent repos; empty = caller workspace `/dsh-plugins` |
 | `stagingRoot` | empty | Staging root; empty = caller workspace `/.forge-staging` |
 | `harnessRoot` | empty | deepseek-harness checkout root; empty = auto-discovered upward from the workspace |
 | `subagentProvider` | `spawn` | Subagent provider name (built into the base bundle) |
@@ -112,7 +112,7 @@ Restart `dsh web`, then hard-refresh the browser (**Ctrl+F5**).
 
 1. Ask the AI for a plugin in the chat; it will call `forge_plugin` (or explicitly request the call)
 2. Run `/forge status` to list created repos and their last commits
-3. Generated plugins live at `D:/2-OGP/<name>` and can be installed like any sibling plugin: `dsh plugin --profile web add link:D:/2-OGP/<name>`
+3. Generated plugins live at the caller workspace `/dsh-plugins/<name>` and can be installed like any sibling plugin: `dsh plugin --profile web add link:<workspace>/dsh-plugins/<name>`
 
 ## Design intent: agent self-iteration
 

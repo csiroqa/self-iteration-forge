@@ -29,8 +29,8 @@ export const inject = ['tools', 'subagents', 'commands', 'systemPrompt']
 export interface Config extends ForgeConfig {}
 
 export const Config: z<Config> = z.object({
-  /** 独立仓库所在根目录。 */
-  targetRoot: z.string().default('D:/2-OGP'),
+  /** 独立仓库所在根目录；留空 = 调用方工作区/dsh-plugins。 */
+  targetRoot: z.string().default(''),
   /** staging 根目录；留空 = 父会话工作区/.forge-staging。 */
   stagingRoot: z.string().default(''),
   /** deepseek-harness 检出根；留空 = 从工作区向上自动查找。 */
@@ -66,7 +66,7 @@ export const Config: z<Config> = z.object({
 
 /** 直接 apply()（不经 loader）时也保证字段齐全。 */
 const DEFAULTS: Config = {
-  targetRoot: 'D:/2-OGP',
+  targetRoot: '',
   stagingRoot: '',
   harnessRoot: '',
   subagentProvider: 'spawn',
@@ -141,6 +141,7 @@ export {
 export {
   parseChildReport,
   runForge,
+  resolveTargetRoot,
   cleanupStaleStaging,
   assertNoRegistryHarnessDeps,
   verifyBuildInTarget,

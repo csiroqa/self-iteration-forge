@@ -44,7 +44,10 @@ import {
 
 /** 插件配置（index.ts 的 z schema 与之对应；默认值见 index.ts）。 */
 export interface ForgeConfig {
-  /** 独立仓库所在根目录（Windows 路径或正斜杠均可）。 */
+  /**
+   * 独立仓库所在根目录；留空（默认）= 调用方工作区/dsh-plugins。
+   * forge_plugin 的 targetRoot 参数可临时覆盖。
+   */
   readonly targetRoot: string
   /** staging 根目录；留空 = 调用方工作区/.forge-staging。 */
   readonly stagingRoot: string
@@ -344,6 +347,17 @@ export async function cleanupStaleStaging(stagingRoot: string, ttlDays: number):
   return removed
 }
 
+/** 解析迁移目标根目录：显式参数 > 配置 > 默认（调用方工作区/dsh-plugins）。 */
+export function resolveTargetRoot(args: ForgeArgs, config: ForgeConfig, workspace: string): string {
+  if (args.targetRoot !== undefined && args.targetRoot.trim() !== '') {
+    return path.resolve(args.targetRoot)
+  }
+  if (config.targetRoot.trim() !== '') {
+    return path.resolve(config.targetRoot)
+  }
+  return path.join(workspace, 'dsh-plugins')
+}
+
 /** runForge 的输入（workspace 与 harnessRoot 由调用方解析，便于测试注入）。 */
 export interface RunForgeOptions {
   readonly config: ForgeConfig
@@ -382,9 +396,7 @@ export async function runForge(options: RunForgeOptions): Promise<ForgeToolResul
 async function runForgeLocked(options: RunForgeOptions, name: string): Promise<ForgeToolResult> {
   const { config, workspace, harnessRoot, args, signal, startChild, logger } = options
   const requirement = String(args.requirement ?? '')
-  const targetRoot = args.targetRoot !== undefined && args.targetRoot.trim() !== ''
-    ? path.resolve(args.targetRoot)
-    : path.resolve(config.targetRoot)
+  const targetRoot = resolveTargetRoot(args, config, workspace)
   const migrate = args.migrate !== false
   const update = args.update === true
 
@@ -545,7 +557,7 @@ async function runForgeLocked(options: RunForgeOptions, name: string): Promise<F
 export function registerForgeTool(ctx: Context, config: ForgeConfig): () => void {
   return ctx.tools.register(defineTool({
     name: TOOL_NAME,
-    description: '按需求生成 DSH 插件，用于 agent 自迭代：在正常工作中发现功能值得固化、或需要当前没有的能力、且作为单个插件不会太重时，可自发调用本工具（无需用户明确要求"做插件"）。流程：启动一个新 Agent，在临时目录按姐妹插件仓库规范开发并构建验证插件；完成后迁移为 targetRoot 下的独立 git 仓库，并在功能完成时立即做一次英文 Conventional Commit（非定时提交）；仓库登记进 $DSH_HOME/plugin-forge.json（可用 /forge status 查询）。无缝切换：传 hot: true 立即热挂载到当前运行时（无需重启，本会话马上可用）；传 install: true 自动装入 profile（需配置 installProfile）。注意：本工具会启动子代理、需要网络（pnpm install），单次可能耗时数分钟到数十分钟。',
+    description: '按需求生成 DSH 插件，用于 agent 自迭代：在正常工作中发现功能值得固化、或需要当前没有的能力、且作为单个插件不会太重时，可自发调用本工具（无需用户明确要求"做插件"）。流程：启动一个新 Agent，在临时目录按姐妹插件仓库规范开发并构建验证插件；完成后迁移为「调用方工作区/dsh-plugins/<name>」下的独立 git 仓库，并在功能完成时立即做一次英文 Conventional Commit（非定时提交）；仓库登记进 $DSH_HOME/plugin-forge.json（可用 /forge status 查询）。无缝切换：传 hot: true 立即热挂载到当前运行时（无需重启，本会话马上可用）；传 install: true 自动装入 profile（需配置 installProfile）。注意：本工具会启动子代理、需要网络（pnpm install），单次可能耗时数分钟到数十分钟。',
     parameters: {
       requirement: {
         type: 'string',
@@ -558,7 +570,7 @@ export function registerForgeTool(ctx: Context, config: ForgeConfig): () => void
       },
       targetRoot: {
         type: 'string',
-        description: '独立仓库所在根目录；缺省使用插件配置的 targetRoot（默认 D:/2-OGP）。',
+        description: '独立仓库所在根目录；缺省使用插件配置的 targetRoot（默认调用方工作区/dsh-plugins）。',
       },
       migrate: {
         type: 'boolean',
