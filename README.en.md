@@ -44,8 +44,8 @@ Call `forge_plugin` again with `update: true` to update an existing repo (update
 
 The plugin registers a **self-iteration guidance section** in the system prompt defining the complete loop:
 
-1. **Discover**: while working through normal requirements, the LLM notices that a feature is worth fixing as a plugin (recurring, cross-session reuse), or a needed capability is missing, and it fits as a single lightweight plugin
-2. **Call spontaneously**: proactively call `forge_plugin` (no explicit "build a plugin" request required)
+1. **Discover (self-discovery while executing)**: while carrying out a user task, the LLM itself judges that it lacks the capability needed to finish the job (tool/command/automation gap), is stuck doing repetitive manual work, or that a feature is worth fixing as a plugin (recurring, cross-session reuse) and fits as a single lightweight plugin; **the AI decides what is missing and what to add — no plugin mention from the user required**
+2. **Call spontaneously**: proactively call `forge_plugin` instead of only giving advice (no explicit "build a plugin" request required)
 3. **Deliver**: a subagent develops → build verified → migrated to an independent repo → committed on completion
 4. **Seamless switch**: pass `hot: true` to hot-mount into the current runtime — the session gains the new capability immediately (no restart); pass `install: true` as well to persist across restarts
 

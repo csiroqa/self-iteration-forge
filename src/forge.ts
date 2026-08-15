@@ -86,12 +86,15 @@ export const SELF_ITERATION_SECTION_ORDER = 117
  */
 export function selfIterationSectionText(): string {
   return [
-    '你是 DSH 的自迭代智能体：`forge_plugin` 工具允许你按需生成/更新 DSH 插件来扩展自身能力。',
-    '**在正常描述需求的工作中自发发现并调用**（无需用户明确说"做插件"）：',
-    '1. 当前功能值得作为插件固化（重复出现、跨会话复用、可独立成小工具）；',
-    '2. 需要使用当前没有的能力（工具集/命令集缺口）；',
-    '3. 作为单个插件不会太重（保持小而专一；太重就拆成多个）。',
-    '调用策略：一次迭代一个清晰的小功能（不要一次生成多个）；需求不清晰时先做合理假设并在结果中说明。',
+    '你是 DSH 的自迭代智能体：`forge_plugin` 工具允许你按需生成/更新 DSH 插件来扩展自身能力，',
+    '**由你自己判断何时需要新能力并主动补上，而不是等用户要求"做插件"**。',
+    '在以下情况主动调用（无需用户提及插件）：',
+    '1. **执行任务中自我发现**：正在完成用户任务时，发现自己缺少完成任务所需的能力',
+    '   （没有合适的工具/命令/自动化），或只能靠笨办法重复劳动——先调用 forge_plugin 补齐能力，再完成任务；',
+    '2. **固化价值**：当前功能值得作为插件固化（重复出现、跨会话复用、可独立成小工具）；',
+    '3. **规模合适**：作为单个插件不会太重（保持小而专一；太重就拆成多个，一次迭代一个）。',
+    '不要只给建议或描述方案就了事：当判断值得做时，直接调用 `forge_plugin` 生成并交付。',
+    '调用策略：一次迭代一个清晰的小功能；需求不清晰时先做合理假设并在结果中说明。',
     '交付后**无缝切换**：传 `hot: true` 立即热挂载到当前运行时（无需重启，当前会话马上可用）；',
     '如需重启后也生效，再传 `install: true` 装入 profile（需配置 installProfile）。',
     '本工具会启动子代理、需要网络、耗时数分钟，调用期间可继续其他工作；完成后可用 `/forge status` 查询已建仓库。',
@@ -562,7 +565,7 @@ async function runForgeLocked(options: RunForgeOptions, name: string): Promise<F
 export function registerForgeTool(ctx: Context, config: ForgeConfig): () => void {
   return ctx.tools.register(defineTool({
     name: TOOL_NAME,
-    description: '按需求生成 DSH 插件，用于 agent 自迭代：在正常工作中发现功能值得固化、或需要当前没有的能力、且作为单个插件不会太重时，可自发调用本工具（无需用户明确要求"做插件"）。流程：启动一个新 Agent，在临时目录按姐妹插件仓库规范开发并构建验证插件；完成后迁移为「项目根/dsh-plugins/<name>」（调用方工作区的父目录/dsh-plugins，与 dsh-plugin 工作区平级）下的独立 git 仓库，并在功能完成时立即做一次英文 Conventional Commit（非定时提交）；仓库登记进 $DSH_HOME/plugin-forge.json（可用 /forge status 查询）。无缝切换：传 hot: true 立即热挂载到当前运行时（无需重启，本会话马上可用）；传 install: true 自动装入 profile（需配置 installProfile）。注意：本工具会启动子代理、需要网络（pnpm install），单次可能耗时数分钟到数十分钟。',
+    description: '按需求生成 DSH 插件，用于 agent 自迭代：**由你自己判断何时需要新能力并主动调用**——在执行任务时发现自己缺少所需能力、只能靠笨办法重复劳动，或发现功能值得固化（重复出现、跨会话复用、可独立成小工具）且作为单个插件不会太重时，直接调用本工具补齐能力（无需用户明确要求"做插件"），不要只给建议。流程：启动一个新 Agent，在临时目录按姐妹插件仓库规范开发并构建验证插件；完成后迁移为「项目根/dsh-plugins/<name>」（调用方工作区的父目录/dsh-plugins，与 dsh-plugin 工作区平级）下的独立 git 仓库，并在功能完成时立即做一次英文 Conventional Commit（非定时提交）；仓库登记进 $DSH_HOME/plugin-forge.json（可用 /forge status 查询）。无缝切换：传 hot: true 立即热挂载到当前运行时（无需重启，本会话马上可用）；传 install: true 自动装入 profile（需配置 installProfile）。注意：本工具会启动子代理、需要网络（pnpm install），单次可能耗时数分钟到数十分钟。',
     parameters: {
       requirement: {
         type: 'string',
