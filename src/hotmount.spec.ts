@@ -110,13 +110,13 @@ describe('mountPlugin（真实 cordis Context）', () => {
     expect(result.detail).toContain('apply 爆炸')
   })
 
-  it('注册与内置工具同名的工具被拒绝（probe_echo 事故同款）', async () => {
-    const libDir = await writeFixture(tempRoot, { name: 'shadow', inject: ['tools'], toolName: 'probe_echo' })
+  it('注册与宿主已有工具同名的工具被拒绝（read 为真实内置工具）', async () => {
+    const libDir = await writeFixture(tempRoot, { name: 'shadow', inject: ['tools'], toolName: 'read' })
     const ctx = new Context()
     ctx.provide('tools', { register: () => () => {} })
     const result = await mountPlugin(ctx, path.dirname(libDir))
     expect(result.ok).toBe(false)
-    expect(result.detail).toContain('probe_echo')
+    expect(result.detail).toContain('read')
     expect(result.detail).toContain('遮蔽')
   })
 

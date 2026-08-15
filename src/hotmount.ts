@@ -84,17 +84,29 @@ export async function mountPlugin(ctx: Context, dir: string): Promise<HotMountRe
         }
       }
     }
-    // 内置名冲突拦截：插件注册与 DSH 内置工具同名的工具时，跨 scope 注册
-    // 不报错但模型侧遮蔽（真实事故：probe_echo）。包装 register 在挂载期拦截。
-    const toolsService = ctx.get('tools') as { register?: (definition: unknown) => unknown } | undefined
+    // 宿主工具名冲突拦截：插件注册与宿主已有工具同名的工具时，跨 scope
+    // 注册不报错（dsh-tools 只拦截同 scope 重名）但模型侧遮蔽。
+    // 动态快照（当前运行时 schemas）+ 静态清单（BUILTIN_TOOL_NAMES）并集，
+    // 静态清单兜底 schemas 不可用（如测试假服务）或 agent scope 工具的场合。
+    const toolsService = ctx.get('tools') as {
+      register?: (definition: unknown) => unknown
+      schemas?: () => { name: string }[]
+    } | undefined
     let originalRegister: ((definition: unknown) => unknown) | undefined
     if (toolsService !== undefined && typeof toolsService.register === 'function') {
       originalRegister = toolsService.register.bind(toolsService)
+      let known: ReadonlySet<string> = BUILTIN_TOOL_NAMES
+      try {
+        const dynamic = toolsService.schemas?.()?.map((s) => s.name) ?? []
+        if (dynamic.length > 0) known = new Set([...BUILTIN_TOOL_NAMES, ...dynamic])
+      } catch {
+        // schemas 不可用时不阻断挂载，静态清单仍生效。
+      }
       toolsService.register = (definition: unknown) => {
         const name = (definition as { name?: unknown }).name
-        if (typeof name === 'string' && BUILTIN_TOOL_NAMES.has(name)) {
+        if (typeof name === 'string' && known.has(name)) {
           throw new TypeError(
-            `tool "${name}" 与 DSH 内置工具同名：跨 scope 注册不会报错但模型侧会发生遮蔽（已阻止热挂载，请改名后 update=true 重试）`,
+            `tool "${name}" 与宿主已有工具同名：跨 scope 注册不会报错但模型侧会发生遮蔽（已阻止热挂载，请改名后 update=true 重试）`,
           )
         }
         return originalRegister!(definition)

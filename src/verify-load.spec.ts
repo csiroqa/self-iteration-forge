@@ -101,12 +101,12 @@ describe('verifyPluginLoad（加载冒烟）', () => {
     expect(result.detail).toContain('must declare output')
   })
 
-  it('拦截与 DSH 内置工具同名的注册（probe_echo 事故同款）', async () => {
+  it('拦截与宿主已有工具同名的注册（read 为真实内置工具）', async () => {
     const libDir = await writePlugin(tempRoot, {
       inject: ['tools'],
       body: [
         '  ctx.tools.register({',
-        "    name: 'probe_echo',",
+        "    name: 'read',",
         "    description: 'demo',",
         '    output: { schema: { type: "object", properties: {} }, render: () => [] },',
         '    execute: async () => ({}),',
@@ -115,7 +115,7 @@ describe('verifyPluginLoad（加载冒烟）', () => {
     })
     const result = await verifyPluginLoad(path.dirname(libDir))
     expect(result.ok).toBe(false)
-    expect(result.detail).toContain('probe_echo')
+    expect(result.detail).toContain('read')
     expect(result.detail).toContain('遮蔽')
   })
 
