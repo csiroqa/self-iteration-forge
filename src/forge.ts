@@ -236,6 +236,19 @@ async function listRelativeFiles(root: string): Promise<string[]> {
   return files.sort()
 }
 
+/**
+ * 剔除对象中的 undefined 字段。
+ * DSH 工具注册表要求返回值是无损 JSON（snapshotJsonValue 往返校验）：
+ * undefined 属性会在 JSON 往返中丢失，导致 "value is not lossless JSON"。
+ */
+function withoutUndefined<T extends object>(value: T): T {
+  const out: Record<string, unknown> = {}
+  for (const [key, val] of Object.entries(value)) {
+    if (val !== undefined) out[key] = val
+  }
+  return out as T
+}
+
 /** 把工具返回的 value 渲染成模型可见文本。 */
 function renderResult(value: JsonValue): string {
   const result = value as {
@@ -480,7 +493,7 @@ async function runForgeLocked(options: RunForgeOptions, name: string): Promise<F
   // 3.5 重复检测：子代理发现需求与已有插件重复时，拒绝新建（不重复造轮子）。
   if (report?.duplicateOf !== undefined && report.duplicateOf.trim() !== '') {
     logger?.info('forge_plugin: 检测到与已有插件重复 %s → %s，未新建', name, report.duplicateOf.trim())
-    return {
+    return withoutUndefined({
       ok: true,
       pluginName: name,
       committed: false,
@@ -489,7 +502,7 @@ async function runForgeLocked(options: RunForgeOptions, name: string): Promise<F
       duplicated: true,
       existingName: report.duplicateOf.trim(),
       childReport: (report.duplicateNote ?? '').slice(0, 500),
-    }
+    })
   }
 
   // 4. 文件清单。
@@ -581,7 +594,7 @@ async function runForgeLocked(options: RunForgeOptions, name: string): Promise<F
     await rm(staging, { recursive: true, force: true })
   }
 
-  return {
+  return withoutUndefined({
     ok: true,
     pluginName: name,
     migratedTo: migratedTo === undefined ? undefined : toPosix(migratedTo),
@@ -591,7 +604,7 @@ async function runForgeLocked(options: RunForgeOptions, name: string): Promise<F
     files,
     childReport: report === undefined ? child.text.slice(0, 500) : (report.notes ?? '').slice(0, 500),
     installed,
-  }
+  })
 }
 
 /** 注册 forge_plugin 工具；返回撤销函数。 */
@@ -699,10 +712,10 @@ export function registerForgeTool(ctx: Context, config: ForgeConfig): () => void
         const mount = await mountPlugin(ctx, result.migratedTo)
         if (mount.ok) {
           ctx.logger.info('forge_plugin: 已热挂载 %s 到当前运行时', result.migratedTo)
-          return { ...result, hotMounted: true }
+          return withoutUndefined({ ...result, hotMounted: true })
         }
         ctx.logger.warn('forge_plugin: 热挂载失败 %s：%s', result.migratedTo, mount.detail ?? '')
-        return { ...result, hotMounted: false, hotDetail: mount.detail }
+        return withoutUndefined({ ...result, hotMounted: false, hotDetail: mount.detail })
       }
       return result
     },

@@ -11,6 +11,7 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { snapshotJsonValue } from '@deepseek-ai/dsh-session'
 import { runForge, type ForgeConfig, type StartChild } from './forge.ts'
 import { loadRegistry } from './registry.ts'
 import { findHarnessRoot, relativeLink, runCommand, toPosix } from './utils.ts'
@@ -181,6 +182,8 @@ describe('runForge 端到端（假子代理 + 真实迁移/构建/git）', () =>
     expect(result.commitSubject).toBe('feat: demo-mini: add minimal demo plugin')
     expect(result.build).toBe('passed')
     expect(result.files).toContain('src/index.ts')
+    // 防回归：返回值必须是无损 JSON（工具注册表会以此校验，undefined 字段会失败）。
+    expect(snapshotJsonValue(result)).toBeDefined()
 
     // 迁移目录：link 已改写为目标深度。
     const pkg = JSON.parse(await readFile(path.join(target, 'package.json'), 'utf8')) as {
@@ -284,6 +287,8 @@ describe('runForge 端到端（假子代理 + 真实迁移/构建/git）', () =>
     expect(result.existingName).toBe('existing-demo')
     expect(result.ok).toBe(true)
     expect(result.migratedTo).toBeUndefined()
+    // 防回归：duplicate 分支返回值同样必须是无损 JSON。
+    expect(snapshotJsonValue(result)).toBeDefined()
     await expect(stat(target)).rejects.toThrow()
     const registry = await loadRegistry()
     expect(registry.repos).toHaveLength(0)
