@@ -32,7 +32,8 @@
     "forge",
     "plugin-generator",
     "subagent",
-    "self-iteration"
+    "self-iteration",
+    "ai-native"
   ],
   "author": "csiroqa <justinwangyj@163.com>",
   "license": "MIT",

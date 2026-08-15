@@ -6,6 +6,14 @@ DeepSeek Harness（DSH）的**插件锻造厂**：为 AI 提供 `forge_plugin` �
 
 English: [README.en.md](README.en.md)
 
+## AI-native 设计原则（核心定位）
+
+plugin-forge 不是"给用户操作的工具"，而是 **AI-native 的自我迭代基础设施**——AI 是流程主体，人类只需自然表达需求：
+
+- **AI 自主闭环**：发现缺口（执行任务中自我判断"缺什么、该补什么"）→ 决策（值得固化、规模合适）→ 交付（子代理开发 + 自动验证）→ 迭代（`update=true`，重复自动检测不造轮子）→ 使用（默认自动热挂载，本会话即用）——全程无需人类提及"插件"、操作面板或重启
+- **零人工运维**：质量防线（staging 构建验证 + 迁移后真实构建 + 依赖守卫 + **加载冒烟**）与登记（`/forge status`）、清理（staging TTL）全部自动化
+- **人类参与的边界（刻意最小化）**：一次性重启加载 plugin-forge 本体；可选配置（`targetRoot`/`installProfile`）；正式对外分发（推送到 GitHub 后用 repository 源安装）
+
 ## 功能
 
 ### forge_plugin 工具（AI 可调用）

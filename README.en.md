@@ -6,6 +6,14 @@ A **plugin forge** for DeepSeek Harness (DSH): exposes the `forge_plugin` tool s
 
 中文: [README.md](README.md)
 
+## AI-native design principle (core positioning)
+
+plugin-forge is not a "tool for users to operate" — it is an **AI-native self-iteration infrastructure** where the AI is the subject of the flow and humans only express needs naturally:
+
+- **Autonomous AI loop**: discover gaps (self-judging "what is missing, what to add" while executing tasks) → decide (worth fixing, right size) → deliver (subagent development + automated verification) → iterate (`update=true`, automatic duplicate detection so wheels are never reinvented) → use (hot-mounted by default, usable in the current session) — no human mention of "plugin", no panel operations, no restart required
+- **Zero manual ops**: quality defenses (staging build verification + real rebuild after migration + dependency guards + **load smoke**) and registration (`/forge status`) and cleanup (staging TTL) are all automated
+- **Human involvement (deliberately minimal)**: a one-time restart to load plugin-forge itself; optional config (`targetRoot`/`installProfile`); formal external distribution (push to GitHub, install via a repository source)
+
 ## Features
 
 ### `forge_plugin` tool (AI-callable)
