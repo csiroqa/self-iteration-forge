@@ -1,21 +1,7 @@
 /**
- * plugin-forge —— forge_plugin 工具与 /forge status 命令。
- *
- * 编排流程（每一步失败都不静默吞掉，如实报错）：
- *   1. （可选）清理 stagingRoot 下过期的旧 staging 目录；
- *   2. 清理并重建本次 staging 目录（调用方工作区内 /.forge-staging/<name>）；
- *   3. 启动全新子代理（spawn provider，maxChildDepth=2：子代理还能再向下委托
- *      一层，同时封顶防无限递归），在 staging 开发并构建验证插件；
- *   4. 子代理 completed 后，把 staging 复制为 targetRoot/<name> 独立仓库：
- *      改写 deepseek-harness link 路径、补齐 .gitignore、校验没有写成
- *      registry 版本号的 @deepseek-ai/* 依赖；
- *   5. 在目标目录重新 pnpm install + pnpm build 验证迁移结果；
- *   6. git init（如无）→ git add -A → 检查 diff → 有变更则用英文 Conventional
- *      Commit 提交一次（功能完成即提交，非定时；不 push/tag/release）；
- *   7. 登记进 $DSH_HOME/plugin-forge.json，供 /forge status 查询。
- *
- * 核心编排抽成 runForge()，子代理启动通过 startChild 注入——单元/集成测试
- * 可以注入假子代理，完整跑通「staging → 迁移 → 构建验证 → 提交 → 登记」。
+ * forge_plugin 工具与 /forge status 命令。
+ * 流程：staging → 子代理开发 → 迁移（link/CI 改写、依赖守卫、加载冒烟）→ 提交 → 登记 → 热挂载。
+ * 编排抽成 runForge()，子代理经 startChild 注入以便测试。
  */
 import type { Context } from '@deepseek-ai/cordis'
 // 类型侧引入 dsh-commands，激活其 Context 增强（ctx.commands）。
@@ -81,12 +67,7 @@ export interface ForgeConfig {
 /** 自迭代引导 section 的渲染顺序（紧随 tool-subagent 的 116.5 之后）。 */
 export const SELF_ITERATION_SECTION_ORDER = 117
 
-/**
- * 面向 agent 的自迭代策略（systemPrompt section，随每次提示词组装渲染）。
- * 保持精简：不注入"已有插件清单"（避免无谓上下文开销）——重复检测由
- * forge 子代理在开发前完成（读 registry + dsh-plugins 目录），重复时
- * 宿主拒绝新建并建议 update=true。
- */
+/** 自迭代引导节（systemPrompt section，随每次提示词组装渲染；不注入已有插件清单，重复检测由子代理完成）。 */
 export function selfIterationSectionText(): string {
   return [
     '你是 DSH 的自迭代智能体：判断缺什么、主动用 `forge_plugin` 补齐（无需用户要求"做插件"）。',
@@ -237,11 +218,7 @@ async function listRelativeFiles(root: string): Promise<string[]> {
   return files.sort()
 }
 
-/**
- * 剔除对象中的 undefined 字段。
- * DSH 工具注册表要求返回值是无损 JSON（snapshotJsonValue 往返校验）：
- * undefined 属性会在 JSON 往返中丢失，导致 "value is not lossless JSON"。
- */
+/** 剔除 undefined 字段：DSH 工具返回值必须是无损 JSON，undefined 属性会在往返中丢失。 */
 function withoutUndefined<T extends object>(value: T): T {
   const out: Record<string, unknown> = {}
   for (const [key, val] of Object.entries(value)) {
@@ -269,8 +246,7 @@ function renderResult(value: JsonValue): string {
   }
   const lines: string[] = []
   if (result.duplicated === true) {
-    lines.push(`⚠️ 需求与已有插件「${result.existingName ?? '?'}」重复，未新建（不重复造轮子）。`)
-    lines.push(`建议：用 update=true 对「${result.existingName ?? '?'}」做迭代，或调整需求聚焦不同能力。`)
+    lines.push(`需求与已有插件「${result.existingName ?? '?'}」重复，未新建。用 update=true 迭代，或调整需求。`)
     const note = result.childReport
     if (note !== undefined && note.trim() !== '') {
       lines.push(`检测说明：${note.trim().slice(0, 500)}`)
@@ -278,23 +254,22 @@ function renderResult(value: JsonValue): string {
     return lines.join('\n')
   }
   if (result.ok === true) {
-    lines.push(`✅ 插件 ${result.pluginName ?? ''} 已生成。`)
-    if (result.migratedTo !== undefined) lines.push(`📦 独立仓库：${result.migratedTo}`)
-    if (result.commitSubject !== undefined) lines.push(`🔖 功能完成提交：${result.commitSubject}`)
-    lines.push(`🛠 目标目录构建验证：${result.build ?? 'skipped'}`)
-    if (result.installed === true) lines.push('⚙️ 已自动装入 profile，重启后立即可用。')
+    lines.push(`插件 ${result.pluginName ?? ''} 已生成。`)
+    if (result.migratedTo !== undefined) lines.push(`仓库：${result.migratedTo}`)
+    if (result.commitSubject !== undefined) lines.push(`提交：${result.commitSubject}`)
+    lines.push(`构建验证：${result.build ?? 'skipped'}`)
+    if (result.installed === true) lines.push('已装入 profile，重启后生效。')
     if (result.hotMounted === true) {
-      lines.push('⚡ 已热挂载到当前运行时：无需重启，本会话立即可以使用新能力。')
+      lines.push('已热挂载到当前运行时，本会话立即可用。')
     } else if (result.hotDetail !== undefined) {
-      lines.push(`⚠️ 热挂载未完成：${result.hotDetail}`)
+      lines.push(`热挂载未完成：${result.hotDetail}`)
     }
     const report = result.childReport
     if (report !== undefined && report.trim() !== '') {
-      // 精简注入：只保留子代理汇报前 500 字符（完整内容在产物仓库与日志里）。
       lines.push(`\n子代理汇报：\n${report.trim().slice(0, 500)}`)
     }
   } else {
-    lines.push(`❌ 插件生成失败：${result.error ?? '未知错误'}`)
+    lines.push(`插件生成失败：${result.error ?? '未知错误'}`)
     if (result.migratedTo !== undefined) lines.push(`（staging/目标目录：${result.migratedTo}）`)
   }
   return lines.join('\n')
@@ -381,12 +356,7 @@ export async function cleanupStaleStaging(stagingRoot: string, ttlDays: number):
   return removed
 }
 
-/**
- * 解析迁移目标根目录：显式参数 > 配置 > 默认。
- * 默认 = 调用方工作区的**父目录**（项目根）/dsh-plugins——
- * 与 dsh-plugin 工作区平级，保证每个插件是项目根下的独立仓库集合
- * （当前会话即 D:\2-OGP\dsh-plugin 的父目录 D:\2-OGP → D:\2-OGP\dsh-plugins）。
- */
+/** 迁移目标根：显式参数 > 配置 > 默认（工作区父目录/dsh-plugins，与工作区平级）。 */
 export function resolveTargetRoot(args: ForgeArgs, config: ForgeConfig, workspace: string): string {
   if (args.targetRoot !== undefined && args.targetRoot.trim() !== '') {
     return path.resolve(args.targetRoot)
@@ -410,12 +380,7 @@ export interface RunForgeOptions {
   readonly logger?: ForgeLogger
 }
 
-/**
- * forge 全流程编排（可测试核心）：
- * staging → 子代理开发 → 迁移 → 依赖守卫 → 目标构建验证 → 提交 → 登记。
- * 关键失败直接 throw（由工具注册表转为 isError 结果）。
- * 同名任务进程内互斥（并发调用直接拒绝，不排队）。
- */
+/** forge 全流程编排（可测试核心）；关键失败 throw；同名任务进程内互斥。 */
 export async function runForge(options: RunForgeOptions): Promise<ForgeToolResult> {
   const requirement = String(options.args.requirement ?? '')
   if (requirement.trim() === '') throw new Error('requirement 不能为空')

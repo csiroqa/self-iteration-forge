@@ -1,7 +1,7 @@
 {
   "name": "@dsh-external/plugin-forge",
   "version": "0.1.0",
-  "description": "DSH 插件锻造厂：为 AI 提供 forge_plugin 工具，按需求启动新 Agent 开发 DSH 插件、构建验证、迁移为 D:/2-OGP 下独立 git 仓库并在功能完成后自动提交（非定时），登记于 $DSH_HOME/plugin-forge.json",
+  "description": "AI-native DSH 插件锻造厂：forge_plugin 工具让 AI 自发发现能力缺口、子代理开发、迁移为独立 git 仓库并自动提交与热挂载",
   "private": true,
   "type": "module",
   "main": "lib/index.js",

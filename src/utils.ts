@@ -1,9 +1,4 @@
-/**
- * plugin-forge —— 通用工具函数（纯 Node，不依赖 DSH 服务）。
- *
- * 只做一件事情的简单函数：命令执行、命名规范化、路径计算。
- * 不在此引入任何外部依赖（AGENTS.md：最小依赖）。
- */
+/** 通用工具函数（纯 Node，无外部依赖）：命令执行、命名、路径计算。 */
 import { execFile } from 'node:child_process'
 import { homedir } from 'node:os'
 import path from 'node:path'

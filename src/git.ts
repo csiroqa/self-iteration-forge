@@ -1,10 +1,4 @@
-/**
- * plugin-forge —— git 仓库操作（host 半区，非沙箱 shell）。
- *
- * 职责单一：确保仓库存在、暂存全部改动、检查是否有可提交变更、
- * 用英文 Conventional Commit 提交。提交前必须检查 diff（AGENTS.md）。
- * 不做 push / tag / release（默认禁止，除非配置明确要求）。
- */
+/** git 操作：ensure/stage/commit（提交前检查 diff；不 push/tag/release，除非配置显式开启）。 */
 import { assertOk, runCommand, type ExecResult } from './utils.ts'
 
 /** 提交作者身份（仓库未配置 user.name/user.email 时的回退）。 */

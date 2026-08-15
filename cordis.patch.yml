@@ -1,33 +1,14 @@
-# @dsh-external/plugin-forge bundle patch: inserts its plugin row into the
-# profile roster. Install with:
-#   dsh plugin --profile web add link:<this-directory>
+# @dsh-external/plugin-forge bundle patch（host 半区：forge_plugin 工具 + /forge status）。
+# 安装：dsh plugin --profile web add link:<this-directory>
 #
-# 该行只挂载 host 半区（forge_plugin 工具 + /forge status 命令，无浏览器 UI）。
-#
-# config 详解（全部可选，默认值内置在代码 src/index.ts 的 DEFAULTS）：
-#   targetRoot        独立仓库所在根目录；留空（默认）= 项目根/dsh-plugins
-#                     （调用方工作区的父目录/dsh-plugins，与 dsh-plugin 工作区平级，
-#                     每个 <name> 是其中独立的 git 仓库）；
-#                     forge_plugin 的 targetRoot 参数可临时覆盖
-#   stagingRoot       子代理开发暂存根目录；留空 = 调用方会话工作区/.forge-staging
-#   harnessRoot       deepseek-harness 检出根；留空 = 从工作区向上自动查找
-#   subagentProvider  子代理 provider 名（默认 spawn，base bundle 内置）
-#   maxChildDepth     子代理最大委托深度（默认 2：可再向下委托一层，封顶防递归）
-#   childTimeoutMs    子代理及目标目录构建超时（毫秒，默认 2700000 = 45 分钟）
-#   commitType        Conventional Commit 类型（默认 feat）
-#   push              是否提交后 push（默认 false；遵守 AGENTS.md 不自动 push）
-#   gitAuthorName     仓库未配置 git 身份时的作者名（默认 csiroqa）
-#   gitAuthorEmail    仓库未配置 git 身份时的作者邮箱（默认 justinwangyj@163.com）
-#   keepStaging       成功后是否保留 staging 目录（默认 true，便于排查）
-#   installProfile    迁移并提交成功后自动装入的 profile 名（如 'web'）；
-#                     留空（默认）= 不自动安装。需配合 forge_plugin 的
-#                     install: true 参数才会触发（默认关闭，不擅自改用户配置）
-#
-# 自迭代：本插件加载时会注册 systemPrompt 引导节，让 agent 在需要新能力时
-# 自发调用 forge_plugin（无需用户明确要求"做插件"）。
-#
-# 提交语义：功能完成即提交（每次 forge 完成插件的创建/更新并迁移后，做一次
-# 英文 Conventional Commit），不是定时提交。
+# config 全部可选（默认值见 src/index.ts 的 DEFAULTS）：
+#   targetRoot      迁移根目录；留空 = 工作区父目录/dsh-plugins（与工作区平级）
+#   stagingRoot     staging 根；留空 = 工作区/.forge-staging
+#   harnessRoot     deepseek-harness 检出根；留空 = 自动查找
+#   installProfile  install:true 时装入的 profile 名；留空 = 不自动安装
+#   maxChildDepth   子代理委托深度上限（默认 2）
+#   childTimeoutMs  子代理/构建超时（默认 45 分钟）
+#   commitType / push / gitAuthorName / gitAuthorEmail / keepStaging
 - insert:
     - id: plugin-forge
       name: '@dsh-external/plugin-forge'

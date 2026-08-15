@@ -1,10 +1,4 @@
-/**
- * plugin-forge —— 锻造仓库登记表。
- *
- * 持久化在 $DSH_HOME/plugin-forge.json，记录本插件创建的独立仓库，
- * 供 /forge status 查询与后续更新流程复用。原子写入（tmp + rename），
- * 崩溃不会留下半截文件。
- */
+/** 锻造仓库登记表（$DSH_HOME/plugin-forge.json），原子写入。 */
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { dshHome, samePath } from './utils.ts'

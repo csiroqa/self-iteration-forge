@@ -1,17 +1,8 @@
 /**
- * plugin-forge —— 加载冒烟（防"构建通过但启动即崩"）。
- *
- * 背景：子代理产出的插件可能 typecheck/test/build 全绿，但 apply 期抛错
- * （如命令 input.hint 为空、description 为空、name 非法、工具缺 output），
- * 导致 DSH 重启时整个插件树加载失败（真实事故：session-notes）。
- *
- * 做法：在目标目录构建验证通过后，用真实 @deepseek-ai/cordis Context +
- * 复刻 dsh-commands / dsh-tools 关键加载校验的假服务，动态执行插件 apply
- * 并 await fiber 收敛，捕获任何 apply 期错误。
- *
- * 覆盖范围：插件 inject 服务必须是空集或 {'commands','tools'} 的子集
- * （这两个服务的加载校验可被精确复刻）；注入其他服务的插件跳过（返回
- * skipped，由构建层防线兜底），避免假服务掩盖真实行为。
+ * 加载冒烟：构建通过不等于能加载。用真实 cordis Context + 复刻
+ * dsh-commands/dsh-tools 加载校验的假服务执行插件 apply，拦截 apply 期
+ * 错误（命令 input.hint 为空等，真实事故：session-notes 导致启动崩溃）。
+ * 仅覆盖 inject ⊆ {commands, tools} 的插件；其他跳过（构建层兜底）。
  */
 import { Context } from '@deepseek-ai/cordis'
 import { pathToFileURL } from 'node:url'

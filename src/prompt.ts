@@ -1,10 +1,4 @@
-/**
- * plugin-forge —— 子代理提示词构建。
- *
- * 提示词是 forge 的"灵魂"：把用户需求 + 姐妹插件仓库的工具链/格式/
- * 语言风格约定 + 用户全局 AGENTS.md 规则 + 环境约束一次性交给全新子代理，
- * 并要求以固定 REPORT 块汇报，便于宿主解析摘要用于英文 Conventional Commit。
- */
+/** 子代理提示词构建：需求 + 姐妹仓库规范 + AGENTS.md + 环境约束 + REPORT 格式。 */
 import { toPosix } from './utils.ts'
 
 /** 构建子代理提示词所需的上下文。 */

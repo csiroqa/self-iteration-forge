@@ -1,15 +1,4 @@
-/**
- * plugin-forge —— 运行时热挂载（子代理交付后的"无缝切换"）。
- *
- * 把新插件的 lib/index.js 动态 import 并挂载到当前 cordis 运行时
- * （ctx.plugin），使当前会话立即获得新工具/命令，无需重启 dsh web。
- *
- * 约束与降级：
- *  - 只挂载 inject 服务当前运行时可用的插件（缺服务则拒绝并给出重启方案）；
- *  - 动态 import 带 cache-busting query（同一路径反复 import 会命中 ESM
- *    缓存，更新后必须强制加载新实例）；
- *  - 任何失败都返回结构化结果而非抛出，宿主主流程不受影响。
- */
+/** 运行时热挂载：动态 import 插件 lib 并 ctx.plugin 挂载（cache-busting；缺服务拒绝；失败不抛出）。 */
 import type { Context, Plugin } from '@deepseek-ai/cordis'
 import { pathToFileURL } from 'node:url'
 import path from 'node:path'

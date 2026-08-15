@@ -1,14 +1,6 @@
 /**
- * plugin-forge —— DSH 插件锻造厂（host 半区）。
- *
- * 为 AI 提供 forge_plugin 工具：传入需求后启动全新子代理，按姐妹插件
- * 仓库的工具链/格式/语言风格（并遵守用户全局 AGENTS.md）开发并构建
- * 验证 DSH 插件，完成后迁移为 targetRoot 下的独立 git 仓库，并在功能
- * 完成时立即做一次英文 Conventional Commit（非定时提交），登记进
- * $DSH_HOME/plugin-forge.json；/forge status 可查询已建仓库。
- *
- * 设计意图：这是 DSH 内 agent「自迭代」闭环的起点——agent 可以按需
- * 生成/更新插件来扩展 DSH 自身能力。
+ * DSH 插件锻造厂（host 半区）：forge_plugin 工具 + /forge status + 自迭代引导。
+ * AI 原生：AI 自发判断缺口 → 子代理开发 → 独立仓库交付 → 自动热挂载。
  */
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'

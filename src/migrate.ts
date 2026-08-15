@@ -1,10 +1,4 @@
-/**
- * plugin-forge —— 迁移与落地（staging → 独立仓库）。
- *
- * 职责：把子代理在 staging 目录开发的插件复制为 targetRoot 下的独立仓库，
- * 把 package.json 里的 deepseek-harness link: 依赖改写为目标目录的相对路径，
- * 并确保 .gitignore 覆盖 node_modules 等不该提交的内容。
- */
+/** 迁移落地：复制独立仓库、改写 deepseek-harness link/CI 路径、补齐 .gitignore、更新同步删除。 */
 import { access, cp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { relativeLink } from './utils.ts'
