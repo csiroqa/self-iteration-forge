@@ -5,7 +5,9 @@
 # 该行只挂载 host 半区（forge_plugin 工具 + /forge status 命令，无浏览器 UI）。
 #
 # config 详解（全部可选，默认值内置在代码 src/index.ts 的 DEFAULTS）：
-#   targetRoot        独立仓库所在根目录；留空（默认）= 调用方工作区/dsh-plugins；
+#   targetRoot        独立仓库所在根目录；留空（默认）= 项目根/dsh-plugins
+#                     （调用方工作区的父目录/dsh-plugins，与 dsh-plugin 工作区平级，
+#                     每个 <name> 是其中独立的 git 仓库）；
 #                     forge_plugin 的 targetRoot 参数可临时覆盖
 #   stagingRoot       子代理开发暂存根目录；留空 = 调用方会话工作区/.forge-staging
 #   harnessRoot       deepseek-harness 检出根；留空 = 从工作区向上自动查找

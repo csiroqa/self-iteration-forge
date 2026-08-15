@@ -347,7 +347,12 @@ export async function cleanupStaleStaging(stagingRoot: string, ttlDays: number):
   return removed
 }
 
-/** 解析迁移目标根目录：显式参数 > 配置 > 默认（调用方工作区/dsh-plugins）。 */
+/**
+ * 解析迁移目标根目录：显式参数 > 配置 > 默认。
+ * 默认 = 调用方工作区的**父目录**（项目根）/dsh-plugins——
+ * 与 dsh-plugin 工作区平级，保证每个插件是项目根下的独立仓库集合
+ * （当前会话即 D:\2-OGP\dsh-plugin 的父目录 D:\2-OGP → D:\2-OGP\dsh-plugins）。
+ */
 export function resolveTargetRoot(args: ForgeArgs, config: ForgeConfig, workspace: string): string {
   if (args.targetRoot !== undefined && args.targetRoot.trim() !== '') {
     return path.resolve(args.targetRoot)
@@ -355,7 +360,7 @@ export function resolveTargetRoot(args: ForgeArgs, config: ForgeConfig, workspac
   if (config.targetRoot.trim() !== '') {
     return path.resolve(config.targetRoot)
   }
-  return path.join(workspace, 'dsh-plugins')
+  return path.join(path.dirname(workspace), 'dsh-plugins')
 }
 
 /** runForge 的输入（workspace 与 harnessRoot 由调用方解析，便于测试注入）。 */
@@ -557,7 +562,7 @@ async function runForgeLocked(options: RunForgeOptions, name: string): Promise<F
 export function registerForgeTool(ctx: Context, config: ForgeConfig): () => void {
   return ctx.tools.register(defineTool({
     name: TOOL_NAME,
-    description: '按需求生成 DSH 插件，用于 agent 自迭代：在正常工作中发现功能值得固化、或需要当前没有的能力、且作为单个插件不会太重时，可自发调用本工具（无需用户明确要求"做插件"）。流程：启动一个新 Agent，在临时目录按姐妹插件仓库规范开发并构建验证插件；完成后迁移为「调用方工作区/dsh-plugins/<name>」下的独立 git 仓库，并在功能完成时立即做一次英文 Conventional Commit（非定时提交）；仓库登记进 $DSH_HOME/plugin-forge.json（可用 /forge status 查询）。无缝切换：传 hot: true 立即热挂载到当前运行时（无需重启，本会话马上可用）；传 install: true 自动装入 profile（需配置 installProfile）。注意：本工具会启动子代理、需要网络（pnpm install），单次可能耗时数分钟到数十分钟。',
+    description: '按需求生成 DSH 插件，用于 agent 自迭代：在正常工作中发现功能值得固化、或需要当前没有的能力、且作为单个插件不会太重时，可自发调用本工具（无需用户明确要求"做插件"）。流程：启动一个新 Agent，在临时目录按姐妹插件仓库规范开发并构建验证插件；完成后迁移为「项目根/dsh-plugins/<name>」（调用方工作区的父目录/dsh-plugins，与 dsh-plugin 工作区平级）下的独立 git 仓库，并在功能完成时立即做一次英文 Conventional Commit（非定时提交）；仓库登记进 $DSH_HOME/plugin-forge.json（可用 /forge status 查询）。无缝切换：传 hot: true 立即热挂载到当前运行时（无需重启，本会话马上可用）；传 install: true 自动装入 profile（需配置 installProfile）。注意：本工具会启动子代理、需要网络（pnpm install），单次可能耗时数分钟到数十分钟。',
     parameters: {
       requirement: {
         type: 'string',
@@ -570,7 +575,7 @@ export function registerForgeTool(ctx: Context, config: ForgeConfig): () => void
       },
       targetRoot: {
         type: 'string',
-        description: '独立仓库所在根目录；缺省使用插件配置的 targetRoot（默认调用方工作区/dsh-plugins）。',
+        description: '独立仓库所在根目录；缺省使用插件配置的 targetRoot（默认项目根/dsh-plugins，即调用方工作区的父目录/dsh-plugins）。',
       },
       migrate: {
         type: 'boolean',

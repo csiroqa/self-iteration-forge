@@ -29,7 +29,7 @@ export const inject = ['tools', 'subagents', 'commands', 'systemPrompt']
 export interface Config extends ForgeConfig {}
 
 export const Config: z<Config> = z.object({
-  /** 独立仓库所在根目录；留空 = 调用方工作区/dsh-plugins。 */
+  /** 独立仓库所在根目录；留空 = 项目根（调用方工作区的父目录）/dsh-plugins。 */
   targetRoot: z.string().default(''),
   /** staging 根目录；留空 = 父会话工作区/.forge-staging。 */
   stagingRoot: z.string().default(''),

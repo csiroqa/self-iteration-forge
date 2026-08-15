@@ -258,8 +258,9 @@ describe('resolveTargetRoot（迁移目标解析）', () => {
     installProfile: '',
   }
 
-  it('默认解析到调用方工作区/dsh-plugins', () => {
-    expect(resolveTargetRoot({ requirement: 'x' }, base, 'D:/work/proj')).toBe(
+  it('默认解析到项目根（工作区父目录）/dsh-plugins', () => {
+    // 工作区 D:/work/proj/dsh-plugin → 父目录 D:/work/proj/dsh-plugins（与工作区平级）。
+    expect(resolveTargetRoot({ requirement: 'x' }, base, 'D:/work/proj/dsh-plugin')).toBe(
       path.join('D:/work/proj', 'dsh-plugins'),
     )
   })
