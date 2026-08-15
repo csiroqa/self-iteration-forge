@@ -18,7 +18,7 @@ A **plugin forge** for DeepSeek Harness (DSH): exposes the `forge_plugin` tool s
 | `migrate` | no | Whether to migrate into an independent git repo and commit (default `true`) |
 | `update` | no | Whether updating an existing target directory is allowed (default `false`, prevents accidental overwrite) |
 | `install` | no | Whether to auto-install into the profile after migration+commit (default `false`; requires `installProfile` config; takes effect after restart) |
-| `hot` | no | Whether to hot-mount into the current runtime after migration+commit (default `false`; `true` = seamless switch, the current session gets the new tool/command immediately without restart) |
+| `hot` | no | Whether to hot-mount into the current runtime (default `true`: auto-mounted after generation, the session gains the new tool/command immediately; pass `false` to disable) |
 
 Pipeline:
 
@@ -47,7 +47,7 @@ The plugin registers a **self-iteration guidance section** in the system prompt 
 1. **Discover (self-discovery while executing)**: while carrying out a user task, the LLM itself judges that it lacks the capability needed to finish the job (tool/command/automation gap), is stuck doing repetitive manual work, or that a feature is worth fixing as a plugin (recurring, cross-session reuse) and fits as a single lightweight plugin; **the AI decides what is missing and what to add — no plugin mention from the user required**
 2. **Call spontaneously**: proactively call `forge_plugin` instead of only giving advice (no explicit "build a plugin" request required)
 3. **Deliver**: a subagent develops → build verified → migrated to an independent repo → committed on completion
-4. **Seamless switch**: pass `hot: true` to hot-mount into the current runtime — the session gains the new capability immediately (no restart); pass `install: true` as well to persist across restarts
+4. **Seamless switch (hot-mount by default)**: the plugin is hot-mounted into the current runtime automatically — the session gains the new capability immediately (no restart); pass `install: true` as well to persist across restarts
 
 **No wheel reinvention (zero context overhead)**: the guidance section does not inject the existing-plugin list (saves tokens) — instead the **forge subagent self-checks before developing**: it reads `$DSH_HOME/plugin-forge.json` (with Chinese summaries) and the target root directory; if the requirement duplicates/highly overlaps an existing plugin, it builds nothing and reports `duplicate_of` in the REPORT, the host refuses to create a new repo and returns `existingName`, and the caller iterates with `update=true` instead.
 
@@ -115,6 +115,27 @@ Restart `dsh web`, then hard-refresh the browser (**Ctrl+F5**).
 1. Ask the AI for a plugin in the chat; it will call `forge_plugin` (or explicitly request the call)
 2. Run `/forge status` to list created repos and their last commits
 3. Generated plugins live at the project root (parent of the caller workspace) `/dsh-plugins/<name>` and can be installed like any sibling plugin: `dsh plugin --profile web add link:<project-root>/dsh-plugins/<name>`
+
+## Working with the Repository plugin mechanism (plugin-console)
+
+DSH also has a **home-level Repository plugin mechanism** (third-party `@dsh-external/plugin-console` + `repository-plugins.repositories` in `$DSH_HOME/cordis.patch.yml`, not built into DSH core): the plugin panel manages remote plugin sources as lines — **adding a line installs, updating locks to the latest remote commit, deleting a line uninstalls, and edits take effect immediately without restart**. Line format:
+
+```text
+github:owner/repo#ref                          # single-package repo
+github:owner/repo#ref&path:/packages/<subpkg>  # monorepo subpackage
+```
+
+How forge products fit in:
+
+1. Every forge-generated plugin is an **independent git repo** (`/dsh-plugins/<name>`, committed on completion) with a single-package layout — push it to GitHub and add it directly as a repository source (no `&path:` needed)
+2. After iterating with `forge_plugin(update=true)` and pushing, the panel's "update" locks to the latest commit
+3. Delivery methods compared:
+
+| Method | Effective | Use case |
+| --- | --- | --- |
+| hot-mount (default) | immediately, current instance | default delivery: usable right after generation (`hot: false` disables) |
+| `install: true` (profile) | after restart | local persistence in the profile |
+| repository line (plugin-console) | immediately, home level | formal distribution with a GitHub remote |
 
 ## Design intent: agent self-iteration
 

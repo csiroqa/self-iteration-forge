@@ -91,7 +91,7 @@ export function selfIterationSectionText(): string {
     '你是 DSH 的自迭代智能体：判断缺什么、主动用 `forge_plugin` 补齐（无需用户要求"做插件"）。',
     '触发时机：执行任务缺能力/只能笨办法重复劳动；功能值得固化（含复合能力、元能力、系统集成）；单个插件不重。',
     '行动优先：判断值得就调用，不要只给建议。',
-    '交付后 `hot: true` 本会话即用；`install: true` 重启后保留。耗时数分钟、需网络；`/forge status` 可查。',
+    '交付后自动热挂载（本会话立即可用，无需重启）；`install: true` 可装入 profile 持久化。耗时数分钟、需网络；`/forge status` 可查。',
     '重复检测由子代理自动完成：已存在的能力会用 update=true 迭代，不会重复新建。',
   ].join('')
 }
@@ -611,7 +611,7 @@ async function runForgeLocked(options: RunForgeOptions, name: string): Promise<F
 export function registerForgeTool(ctx: Context, config: ForgeConfig): () => void {
   return ctx.tools.register(defineTool({
     name: TOOL_NAME,
-    description: '按需求生成 DSH 插件（agent 自迭代）：当你判断需要当前没有的能力、或功能值得固化且单个插件不重时，主动调用本工具补齐（无需用户要求），不要只给建议。流程：启动子代理开发构建 → 迁移为「项目根/dsh-plugins/<name>」独立 git 仓库 → 功能完成即提交（英文 Conventional Commit）→ 登记 $DSH_HOME/plugin-forge.json（/forge status 可查）。子代理会自动检测与已有插件的重复：重复时拒绝新建并返回 existingName，改用 update=true 迭代。hot:true 热挂载本会话立即可用（无需重启）；install:true 装入 profile。耗时数分钟、需网络。',
+    description: '按需求生成 DSH 插件（agent 自迭代）：当你判断需要当前没有的能力、或功能值得固化且单个插件不重时，主动调用本工具补齐（无需用户要求），不要只给建议。流程：启动子代理开发构建 → 迁移为「项目根/dsh-plugins/<name>」独立 git 仓库 → 功能完成即提交（英文 Conventional Commit）→ **自动热挂载到当前运行时（本会话立即可用，无需重启）** → 登记 $DSH_HOME/plugin-forge.json（/forge status 可查）。子代理会自动检测与已有插件的重复：重复时拒绝新建并返回 existingName，改用 update=true 迭代。install:true 可装入 profile 持久化。耗时数分钟、需网络。',
     parameters: {
       requirement: {
         type: 'string',
@@ -640,7 +640,7 @@ export function registerForgeTool(ctx: Context, config: ForgeConfig): () => void
       },
       hot: {
         type: 'boolean',
-        description: '热挂载到当前运行时（默认 false；true=无缝切换，本会话立即可用）。',
+        description: '热挂载到当前运行时（默认 true：生成后自动挂载，本会话立即可用；传 false 可关闭）。',
       },
     },
     output: {
@@ -707,8 +707,9 @@ export function registerForgeTool(ctx: Context, config: ForgeConfig): () => void
         startChild,
         logger: ctx.logger,
       })
-      // 无缝切换：hot: true 时把新插件热挂载到当前运行时（无需重启）。
-      if (args.hot === true && result.ok && result.migratedTo !== undefined) {
+      // 无缝切换（默认开启）：生成成功后把新插件热挂载到当前运行时（无需重启）。
+      // 热挂载失败不阻塞交付（已提交的仓库始终可用），仅返回 hotDetail 提示。
+      if (args.hot !== false && result.ok && result.migratedTo !== undefined) {
         const mount = await mountPlugin(ctx, result.migratedTo)
         if (mount.ok) {
           ctx.logger.info('forge_plugin: 已热挂载 %s 到当前运行时', result.migratedTo)

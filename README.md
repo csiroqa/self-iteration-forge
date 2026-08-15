@@ -20,7 +20,7 @@ English: [README.en.md](README.en.md)
 | `migrate` | 否 | 是否迁移为独立 git 仓库并提交（默认 `true`） |
 | `update` | 否 | 目标目录已存在时是否允许更新（默认 `false`，防误覆盖） |
 | `install` | 否 | 迁移并提交成功后是否自动装入 profile 立即可用（默认 `false`；需配置 `installProfile`，重启后生效） |
-| `hot` | 否 | 迁移并提交成功后是否**热挂载**到当前运行时（默认 `false`；`true` = 无缝切换，当前会话立即获得新工具/命令，无需重启） |
+| `hot` | 否 | **热挂载**到当前运行时（**默认 `true`**：生成后自动挂载，本会话立即可用；传 `false` 可关闭） |
 
 执行流程：
 
@@ -36,7 +36,7 @@ English: [README.en.md](README.en.md)
    - 目标目录重新 `pnpm install && pnpm build` 验证迁移结果
 4. **功能完成即提交**：`git init`（如无）→ `git add -A` → 检查 diff → 有变更则提交一次英文 Conventional Commit（如 `feat: web-search-memo: add keyword search for session memos`）；不 push（除非配置显式开启）
 5. 登记进 `$DSH_HOME/plugin-forge.json`（原子写入）
-6. **无缝切换（`hot: true`）**：动态 import 新插件的 `lib/index.js`（cache-busting 防模块缓存）并 `ctx.plugin()` 挂载到当前运行时——当前会话下一轮即可使用新工具/命令，**无需重启**；挂载前校验插件声明的 inject 服务当前运行时可用，不可用则拒绝并提示改走 `install: true`
+6. **无缝切换（默认热挂载）**：动态 import 新插件的 `lib/index.js`（cache-busting 防模块缓存）并 `ctx.plugin()` 挂载到当前运行时——当前会话下一轮即可使用新工具/命令，**无需重启**；挂载前校验插件声明的 inject 服务当前运行时可用，不可用则拒绝并提示改走 `install: true`
 
 ### /forge status
 
@@ -131,6 +131,27 @@ dsh plugin --profile web add link:D:\2-OGP\plugin-forge   # Windows
 1. 在会话中直接对 AI 说需求，AI 会调用 `forge_plugin`（也可在提示词里显式要求调用）
 2. 侧栏输入 `/forge status` 查看已创建的插件仓库与最近提交
 3. 生成的插件在项目根（调用方工作区的父目录）`/dsh-plugins/<name>`，可像其他姐妹插件一样 `dsh plugin --profile web add link:<项目根>/dsh-plugins/<name>` 装入使用
+
+## Repository 插件机制配合（plugin-console）
+
+DSH 还有一套**家目录层面的 Repository 插件机制**（第三方 `@dsh-external/plugin-console` + `$DSH_HOME/cordis.patch.yml` 的 `repository-plugins.repositories`，非 DSH 核心内置）：插件面板按行管理远端插件源——**添加行 = 安装、更新 = 锁定远端最新 commit、删除行 = 卸载，修改立即生效无需重启**。行格式：
+
+```text
+github:owner/repo#ref                    # 单包仓库
+github:owner/repo#ref&path:/packages/<子包>   # monorepo 子包
+```
+
+forge 产物的配合方式：
+
+1. forge 生成的每个插件都是**独立 git 仓库**（`/dsh-plugins/<name>`，功能完成即提交），单包结构——推送到 GitHub 后即可作为 repository 源直接添加（无需 `&path:`）
+2. 后续用 `forge_plugin(update=true)` 迭代并 push 后，面板"更新"即锁定到最新 commit
+3. 三种交付方式对照：
+
+| 方式 | 生效时机 | 适用场景 |
+| --- | --- | --- |
+| 热挂载（默认） | 立即，当前运行实例 | 默认交付方式：生成即用（`hot: false` 可关闭） |
+| `install: true`（profile） | 重启后 | 本地持久化到 profile |
+| repository 行（plugin-console） | 立即，家目录层面 | 有 GitHub 远端的正式分发 |
 
 ## 真实 LLM 实例测试（无需重启 GUI）
 
