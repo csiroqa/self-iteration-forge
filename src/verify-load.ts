@@ -83,7 +83,7 @@ export interface VerifyLoadResult {
 export async function verifyPluginLoad(dir: string): Promise<VerifyLoadResult> {
   const { mod, detail } = await loadPluginLib(dir, 'verify')
   if (mod === undefined) {
-    // lib 缺失属于"未构建"，由构建层防线兜底（保持原语义：skipped 视为 ok）。
+    // lib 缺失属于"未构建"，由构建层检查覆盖（保持原语义：skipped 视为 ok）。
     if (detail !== undefined && detail.includes('lib/index.js 不存在')) {
       return { ok: true, detail: 'skipped: lib/index.js 不存在' }
     }

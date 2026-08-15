@@ -15,7 +15,7 @@ English: [README.en.md](README.en.md)
 | `targetRoot` | string | 项目根/dsh-plugins | 迁移根目录（参数 > 配置 > 默认） |
 | `migrate` | boolean | `true` | 迁移为独立仓库并提交 |
 | `update` | boolean | `false` | 更新既有仓库（防误覆盖） |
-| `install` | boolean | `false` | 装入 profile（需配置 installProfile） |
+| `install` | boolean | 缺省自动 | 装入 profile：缺省自动装入当前 profile；`false` 关闭；`installProfile` 可显式指定 |
 | `hot` | boolean | `true` | 热挂载到当前运行时 |
 
 输出 JSON：
@@ -26,7 +26,7 @@ English: [README.en.md](README.en.md)
 | `migratedTo` | 仓库绝对路径（正斜杠）；`migrate=false` 时缺省 |
 | `commitSubject` | 提交 subject；未提交时缺省 |
 | `childReport` | 子代理 REPORT notes（截断 500 字符） |
-| `installed` `hotMounted` `hotDetail` | profile 装入 / 热挂载结果；热挂载失败不阻塞交付 |
+| `installed` `installDetail` `hotMounted` `hotDetail` | profile 装入（`installed=false` 时 `installDetail` 为未装入原因）/ 热挂载结果；两者失败均不阻塞交付 |
 | `duplicated` `existingName` | 子代理判定与既有插件重复：拒绝新建，返回既有仓库名 |
 
 失败（子代理未完成 / 迁移后构建失败 / 加载冒烟未通过）throw，staging 保留。
@@ -44,7 +44,7 @@ registry 为空时输出「plugin-forge 尚未创建任何插件仓库。」
 
 ## 流程
 
-staging → 子代理开发（typecheck/test/build）→ 重复检测 → 迁移 → 目标重建 → 加载冒烟 → git init/commit → 登记 → 热挂载。
+staging → 子代理开发（typecheck/test/build）→ 重复检测 → 迁移 → 目标重建 → 加载冒烟 → git init/commit → 登记 → 装入 profile（缺省自动）→ 热挂载。
 
 - staging：`<stagingRoot>/<name>`，默认 `工作区/.forge-staging/<name>`；子代理仅写此处
 - 同名任务进程内互斥；`stagingTtlDays > 0` 时启动前清理过期目录
@@ -74,11 +74,12 @@ staging → 子代理开发（typecheck/test/build）→ 重复检测 → 迁移
 | `gitAuthorEmail` | `justinwangyj@163.com` | 提交作者邮箱 |
 | `keepStaging` | `true` | 保留 staging 供排查 |
 | `stagingTtlDays` | `0` | staging 保留天数；0 = 不清理 |
-| `installProfile` | `''` | `install: true` 时装入的 profile 名 |
+| `installProfile` | `''` | 装入的 profile 名；空 = 自动探测当前 profile |
+| `autoInstall` | `true` | 成功后自动装入当前 profile（`install: false` 参数可关闭单次） |
 
 ## 质量门
 
-staging 内 typecheck/test/build → 迁移后目标 `pnpm install && pnpm build` → main/types 存在 → 拒绝 registry 版 `@deepseek-ai/*` → **加载冒烟**（真实 cordis Context 执行 apply，拦截 apply 期崩溃——真实事故：命令 `input.hint` 为空导致 DSH 启动即崩）→ **内置名冲突拦截**（工具名与 DSH 内置工具同名时跨 scope 注册不报错但模型侧遮蔽——真实事故：`probe_echo`；加载冒烟与热挂载双重拦截）→ 提交前检查 diff。
+staging 内 typecheck/test/build → 迁移后目标 `pnpm install && pnpm build` → main/types 存在 → 拒绝 registry 版 `@deepseek-ai/*` → **加载冒烟**（真实 cordis Context 执行 apply，拦截 apply 期崩溃——真实事故：命令 `input.hint` 为空导致 DSH 启动即崩）→ **宿主工具名冲突拦截**（机制确认：dsh-tools 跨 scope 同名注册不报错但模型侧遮蔽；加载冒烟与热挂载双重拦截）→ 提交前检查 diff。
 
 ## 安装
 
@@ -92,7 +93,7 @@ dsh plugin --profile web add link:D:\2-OGP\plugin-forge
 ## 交付方式
 
 1. 热挂载（默认）：生成后挂载当前运行时，本会话即用
-2. install（`install: true`）：装入配置的 profile，重启生效
+2. 装入 profile（缺省自动）：探测当前 profile（`installProfile` 可显式指定），重启生效
 3. repository 源（家目录层 plugin-console）：`$DSH_HOME/cordis.patch.yml` 的 `repository-plugins.repositories`，面板行管理——添加=安装、更新=锁定远端最新 commit、删行=卸载、立即生效；行格式 `github:owner/repo#ref`（monorepo 子包加 `&path:/packages/<子包>`）。forge 产物是单包独立仓库，push 后可直接作源；`update=true` 迭代 push 后面板更新即拉新 commit
 
 ## 真实 LLM 测试（免重启 GUI）

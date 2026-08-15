@@ -2,7 +2,7 @@
  * plugin-forge —— 真实 LLM 实例测试的宿主侧脚本。
  *
  * 两个模式：
- *   node scripts/llm-e2e-host.mjs prompt <name> <requirement> <stagingDir> <targetRoot> <harnessRoot>
+ *   node scripts/llm-e2e-host.mjs prompt <name> <stagingDir> <targetRoot> <harnessRoot> <requirement> [create|update]
  *     生成并打印 forge 子代理的真实提示词（buildChildPrompt），
  *     供外部把 LLM 子代理接到 staging 目录上执行。
  *   node scripts/llm-e2e-host.mjs run <name> <stagingDir> <targetRoot> <harnessRoot> <commitSubject>

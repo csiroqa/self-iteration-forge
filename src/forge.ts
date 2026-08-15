@@ -418,7 +418,7 @@ export interface RunForgeOptions {
 }
 
 /**
- * 互斥释放兜底（B-R2-2）：若子代理在取消/超时时不能使 runForgeLocked 收敛，
+ * 互斥释放守卫（B-R2-2）：若子代理在取消/超时时不能使 runForgeLocked 收敛，
  * 该 promise 保证 signal 触发后必然 settle，从而 runForge 的 finally 一定执行，
  * 同名插件名不会被永久标记为"进行中"。
  */

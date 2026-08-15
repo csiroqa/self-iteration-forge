@@ -17,7 +17,7 @@ export const name = 'plugin-forge'
 /** 需要注入的服务：工具注册表、子代理运行时、命令注册表、系统提示词（自迭代引导）。 */
 export const inject = ['tools', 'subagents', 'commands', 'systemPrompt']
 
-/** 配置（默认值即出厂值；cordis.patch.yml 的 config 可覆盖）。 */
+/** 配置（默认值见下；cordis.patch.yml 的 config 可覆盖）。 */
 export interface Config extends ForgeConfig {}
 
 /** Config schema 的默认值（唯一真源；apply 经 Config() 求值，保证直接 apply 路径也生效）。 */

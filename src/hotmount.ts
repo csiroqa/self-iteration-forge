@@ -87,7 +87,7 @@ export async function mountPlugin(ctx: Context, dir: string): Promise<HotMountRe
     // 宿主工具名冲突拦截：插件注册与宿主已有工具同名的工具时，跨 scope
     // 注册不报错（dsh-tools 只拦截同 scope 重名）但模型侧遮蔽。
     // 动态快照（当前运行时 schemas）+ 静态清单（BUILTIN_TOOL_NAMES）并集，
-    // 静态清单兜底 schemas 不可用（如测试假服务）或 agent scope 工具的场合。
+    // 静态清单补充 schemas 不可用（如测试假服务）或 agent scope 工具的场合。
     const toolsService = ctx.get('tools') as {
       register?: (definition: unknown) => unknown
       schemas?: () => { name: string }[]

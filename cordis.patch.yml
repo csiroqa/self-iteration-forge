@@ -2,13 +2,15 @@
 # 安装：dsh plugin --profile web add link:<this-directory>
 #
 # config 全部可选（默认值见 src/index.ts 的 DEFAULTS）：
-#   targetRoot      迁移根目录；留空 = 工作区父目录/dsh-plugins（与工作区平级）
-#   stagingRoot     staging 根；留空 = 工作区/.forge-staging
-#   harnessRoot     deepseek-harness 检出根；留空 = 自动查找
-#   installProfile  install:true 时装入的 profile 名；留空 = 不自动安装
-#   maxChildDepth   子代理委托深度上限（默认 2）
-#   childTimeoutMs  子代理/构建超时（默认 45 分钟）
-#   commitType / push / gitAuthorName / gitAuthorEmail / keepStaging
+#   targetRoot       迁移根目录；留空 = 工作区父目录/dsh-plugins（与工作区平级）
+#   stagingRoot      staging 根；留空 = 工作区/.forge-staging
+#   harnessRoot      deepseek-harness 检出根；留空 = 自动查找
+#   subagentProvider 子代理 provider（默认 spawn）
+#   installProfile   装入的 profile 名；留空 = 自动探测当前 profile（bundle 含 @deepseek-ai/dsh-web-app 者）
+#   autoInstall      成功后自动装入当前 profile（默认 true；forge_plugin 的 install:false 可关闭单次）
+#   maxChildDepth    子代理委托深度上限（默认 2）
+#   childTimeoutMs   子代理/构建超时（默认 45 分钟）
+#   commitType / push / gitAuthorName / gitAuthorEmail / keepStaging / stagingTtlDays / referenceRepos
 - insert:
     - id: plugin-forge
       name: '@dsh-external/plugin-forge'
@@ -25,3 +27,4 @@
         gitAuthorEmail: justinwangyj@163.com
         keepStaging: true
         installProfile: ''
+        autoInstall: true

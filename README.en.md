@@ -15,7 +15,7 @@ An AI-native DSH plugin generator. The AI calls `forge_plugin` while executing t
 | `targetRoot` | string | project-root/dsh-plugins | Migration root (arg > config > default) |
 | `migrate` | boolean | `true` | Migrate to an independent repo and commit |
 | `update` | boolean | `false` | Update an existing repo (guards overwrites) |
-| `install` | boolean | `false` | Install into profile (requires installProfile) |
+| `install` | boolean | auto by default | Install into profile: auto-detects the current profile by default; `false` disables; `installProfile` overrides |
 | `hot` | boolean | `true` | Hot-mount into the current runtime |
 
 Output JSON:
@@ -26,7 +26,7 @@ Output JSON:
 | `migratedTo` | Absolute repo path (forward slashes); absent when `migrate=false` |
 | `commitSubject` | Commit subject; absent when nothing committed |
 | `childReport` | Subagent REPORT notes (truncated to 500 chars) |
-| `installed` `hotMounted` `hotDetail` | Profile install / hot-mount result; a failed hot-mount does not block delivery |
+| `installed` `installDetail` `hotMounted` `hotDetail` | Profile install (`installDetail` explains when `installed=false`) / hot-mount result; neither failure blocks delivery |
 | `duplicated` `existingName` | Subagent judged the requirement a duplicate: no new repo, existing name returned |
 
 Failure (subagent not completed / post-migration build failed / load smoke failed) throws; staging is kept.
@@ -44,7 +44,7 @@ Empty registry prints "plugin-forge 尚未创建任何插件仓库。"
 
 ## Pipeline
 
-staging → subagent develops (typecheck/test/build) → duplicate check → migrate → rebuild in target → load smoke → git init/commit → register → hot-mount.
+staging → subagent develops (typecheck/test/build) → duplicate check → migrate → rebuild in target → load smoke → git init/commit → register → profile install (auto by default) → hot-mount.
 
 - staging: `<stagingRoot>/<name>`, default `workspace/.forge-staging/<name>`; the subagent may only write here
 - Same-name runs are mutexed in-process; stale staging cleaned up before a run when `stagingTtlDays > 0`
@@ -74,11 +74,12 @@ The guidance section does not inject a plugin list (saves context). The subagent
 | `gitAuthorEmail` | `justinwangyj@163.com` | Commit author email |
 | `keepStaging` | `true` | Keep staging for debugging |
 | `stagingTtlDays` | `0` | Staging retention days; 0 = never clean |
-| `installProfile` | `''` | Profile installed into on `install: true` |
+| `installProfile` | `''` | Profile installed into; empty = auto-detect the current profile |
+| `autoInstall` | `true` | Auto-install into the current profile on success (`install: false` disables one call) |
 
 ## Quality gates
 
-typecheck/test/build in staging → `pnpm install && pnpm build` in the target after migration → main/types existence check → reject registry-versioned `@deepseek-ai/*` deps → **load smoke** (run `apply` on a real cordis Context; catches apply-time crashes — real incident: an empty command `input.hint` crashed DSH at boot) → **builtin-name conflict guard** (a tool named like a DSH builtin registers cross-scope without error but shadows on the model side — real incident: `probe_echo`; enforced at both load smoke and hot-mount) → diff checked before commit.
+typecheck/test/build in staging → `pnpm install && pnpm build` in the target after migration → main/types existence check → reject registry-versioned `@deepseek-ai/*` deps → **load smoke** (run `apply` on a real cordis Context; catches apply-time crashes — real incident: an empty command `input.hint` crashed DSH at boot) → **host tool-name conflict guard** (confirmed mechanism: dsh-tools allows cross-scope same-name registration without error, but the model-side view shadows; enforced at both load smoke and hot-mount) → diff checked before commit.
 
 ## Install
 
@@ -92,7 +93,7 @@ Restart `dsh web`. Prerequisites: Node ≥ 22, pnpm, a local `deepseek-harness` 
 ## Delivery methods
 
 1. Hot-mount (default): mounted into the current runtime after generation, usable this session
-2. install (`install: true`): installed into the configured profile, effective after restart
+2. Profile install (auto by default): current profile auto-detected (`installProfile` overrides), effective after restart
 3. repository source (home-level plugin-console): `repository-plugins.repositories` in `$DSH_HOME/cordis.patch.yml`, managed as panel lines — add = install, update = lock to the latest remote commit, delete = uninstall, edits take effect immediately; line format `github:owner/repo#ref` (`&path:/packages/<subpkg>` for monorepos). Forge products are single-package independent repos — push to GitHub and add directly as a source; later `update=true` iterations are picked up by the panel's update
 
 ## Real-LLM testing (no GUI restart)
