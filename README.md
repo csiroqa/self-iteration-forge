@@ -19,6 +19,7 @@ English: [README.en.md](README.en.md)
 | `targetRoot` | 否 | 独立仓库所在根目录；缺省用配置的 `targetRoot`（默认 `D:/2-OGP`） |
 | `migrate` | 否 | 是否迁移为独立 git 仓库并提交（默认 `true`） |
 | `update` | 否 | 目标目录已存在时是否允许更新（默认 `false`，防误覆盖） |
+| `install` | 否 | 迁移并提交成功后是否自动装入 profile 立即可用（默认 `false`；需配置 `installProfile`） |
 
 执行流程：
 
@@ -52,6 +53,14 @@ plugin-forge 已创建的插件仓库（1 个）：
 - 宿主会**预填充** staging（复制现有仓库源码），子代理只需做增量修改，不必重读重写全部文件
 - 子代理在交付目录删除的文件，迁移时会**同步删除**目标仓库中的对应文件（防残留）
 - 更新完成后同样立即提交一次并累计提交次数
+
+## 自迭代：agent 自发调用
+
+插件加载时会在系统提示词注册**自迭代引导节**，让 agent 在需要新能力时**自发**调用 `forge_plugin`（无需用户明确说"做插件"）：
+
+- 用户需求需要新工具/命令/自动化而当前工具集没有 → 主动生成插件
+- 使用中反复遇到同一类限制（可复用、跨会话的能力缺口）→ 生成插件
+- 既有插件能力不足 → `update: true` 增量迭代
 
 ## 自迭代工作流示例（设计意图）
 
@@ -93,6 +102,7 @@ AI：调用 forge_plugin(requirement=..., name="session-auto-archive", update=tr
 | `keepStaging` | `true` | 成功后是否保留 staging 目录（便于排查） |
 | `referenceRepos` | 4 个姐妹仓库 | 子代理提示词中列出的参考仓库（工具链/格式/风格对照） |
 | `stagingTtlDays` | `0` | staging 保留天数；超过则在下一次 forge 调用时清理；`0` = 不清理 |
+| `installProfile` | 空 | 迁移并提交成功后自动装入的 profile 名（如 `web`）；留空 = 不自动安装（默认关闭） |
 
 ## 安装
 

@@ -17,6 +17,7 @@ A **plugin forge** for DeepSeek Harness (DSH): exposes the `forge_plugin` tool s
 | `targetRoot` | no | Root directory for independent repos; defaults to the configured `targetRoot` (`D:/2-OGP`) |
 | `migrate` | no | Whether to migrate into an independent git repo and commit (default `true`) |
 | `update` | no | Whether updating an existing target directory is allowed (default `false`, prevents accidental overwrite) |
+| `install` | no | Whether to auto-install into the profile after migration+commit (default `false`; requires `installProfile` config) |
 
 Pipeline:
 
@@ -37,6 +38,14 @@ Call `forge_plugin` again with `update: true` to update an existing repo (update
 - The host **pre-fills staging** with the current repo sources, so the child agent only makes incremental changes instead of re-reading/re-writing every file
 - Files the child removes from the staging directory are **synced out of the target repo** during migration (no leftovers)
 - The update is committed immediately and the commit count is incremented
+
+## Self-iteration: agents call the forge spontaneously
+
+The plugin registers a **self-iteration guidance section** in the system prompt, so agents **spontaneously** call `forge_plugin` when they need new capabilities (no explicit "build a plugin" request required):
+
+- A user need requires new tools/commands/automation the current toolset lacks → proactively generate a plugin
+- Repeated limitations during use (reusable, cross-session capability gaps) → generate a plugin
+- An existing plugin falls short → iterate with `update: true`
 
 ## Self-iteration workflow example (design intent)
 
@@ -78,6 +87,7 @@ All keys are optional (defaults live in `src/index.ts`):
 | `keepStaging` | `true` | Keep the staging directory after success (easier debugging) |
 | `referenceRepos` | 4 sibling repos | Reference repos listed in the child prompt (toolchain/format/style) |
 | `stagingTtlDays` | `0` | Staging retention days; older staging dirs are cleaned on the next forge call; `0` = never clean |
+| `installProfile` | empty | Profile to auto-install into after migration+commit (e.g. `web`); empty = never (off by default) |
 
 ## Install
 

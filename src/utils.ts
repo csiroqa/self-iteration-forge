@@ -36,12 +36,12 @@ export class CommandFailedError extends Error {
 }
 
 /**
- * Windows 下 pnpm/npm 是 .cmd 包装器，CreateProcess 无法直接执行
+ * Windows 下 pnpm/npm/dsh 是 .cmd 包装器，CreateProcess 无法直接执行
  * （execFile 会抛 EINVAL），必须经 cmd.exe 中转；/s 让 cmd 正确
  * 处理带引号的整条命令。其余可执行文件直接 spawn。
  */
 function resolveSpawn(bin: string, args: readonly string[]): { file: string; args: string[] } {
-  if (process.platform === 'win32' && (bin === 'pnpm' || bin === 'npm' || bin === 'npx')) {
+  if (process.platform === 'win32' && (bin === 'pnpm' || bin === 'npm' || bin === 'npx' || bin === 'dsh')) {
     return { file: process.env.COMSPEC ?? 'cmd.exe', args: ['/d', '/s', '/c', `${bin}.cmd`, ...args] }
   }
   return { file: bin, args: [...args] }

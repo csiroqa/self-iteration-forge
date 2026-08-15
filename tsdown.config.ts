@@ -21,6 +21,7 @@ const HOST_RUNTIME_DEPS = [
   '@deepseek-ai/dsh-llm',
   '@deepseek-ai/dsh-session',
   '@deepseek-ai/dsh-subagent',
+  '@deepseek-ai/dsh-system-prompt',
   '@deepseek-ai/dsh-tools',
   '@deepseek-ai/schemastery',
 ]

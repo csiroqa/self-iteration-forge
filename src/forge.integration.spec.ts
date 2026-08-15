@@ -117,6 +117,7 @@ function makeConfig(): ForgeConfig {
     keepStaging: true,
     referenceRepos: [],
     stagingTtlDays: 0,
+    installProfile: '',
   }
 }
 

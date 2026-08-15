@@ -113,6 +113,7 @@ if (mode === 'run') {
     keepStaging: true,
     referenceRepos: [],
     stagingTtlDays: 0,
+    installProfile: '',
   }
   const build = await verifyBuildInTarget(target, config)
   if (build !== 'passed') {

@@ -47,6 +47,7 @@
     "@deepseek-ai/dsh-llm": "link:../deepseek-harness/packages/llm/llm",
     "@deepseek-ai/dsh-session": "link:../deepseek-harness/packages/core/session",
     "@deepseek-ai/dsh-subagent": "link:../deepseek-harness/packages/subagent/subagent",
+    "@deepseek-ai/dsh-system-prompt": "link:../deepseek-harness/packages/core/system-prompt",
     "@deepseek-ai/dsh-tools": "link:../deepseek-harness/packages/core/tools",
     "@deepseek-ai/schemastery": "link:../deepseek-harness/vendor/schemastery"
   },

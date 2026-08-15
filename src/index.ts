@@ -12,12 +12,18 @@
  */
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
-import { registerForgeCommand, registerForgeTool, type ForgeConfig } from './forge.ts'
+import {
+  registerForgeCommand,
+  registerForgeTool,
+  selfIterationSectionText,
+  SELF_ITERATION_SECTION_ORDER,
+  type ForgeConfig,
+} from './forge.ts'
 
 export const name = 'plugin-forge'
 
-/** 需要注入的服务：工具注册表、子代理运行时、命令注册表。 */
-export const inject = ['tools', 'subagents', 'commands']
+/** 需要注入的服务：工具注册表、子代理运行时、命令注册表、系统提示词（自迭代引导）。 */
+export const inject = ['tools', 'subagents', 'commands', 'systemPrompt']
 
 /** 配置（默认值即出厂值；cordis.patch.yml 的 config 可覆盖）。 */
 export interface Config extends ForgeConfig {}
@@ -54,6 +60,8 @@ export const Config: z<Config> = z.object({
   ]),
   /** staging 目录保留天数；超过则在下一次 forge 调用时清理；0 = 不清理（默认）。 */
   stagingTtlDays: z.natural().default(0),
+  /** 迁移并提交成功后自动装入的 profile 名（如 'web'）；留空 = 不自动安装。 */
+  installProfile: z.string().default(''),
 })
 
 /** 直接 apply()（不经 loader）时也保证字段齐全。 */
@@ -76,12 +84,19 @@ const DEFAULTS: Config = {
     'D:/2-OGP/dsh-plugin/plugins/command-opt',
   ],
   stagingTtlDays: 0,
+  installProfile: '',
 }
 
 export function apply(ctx: Context, config: Partial<Config> = {}): void {
   const merged: Config = { ...DEFAULTS, ...config }
   registerForgeTool(ctx, merged)
   registerForgeCommand(ctx)
+  // 自迭代引导：让 agent 在需要新能力时自发调用 forge_plugin。
+  ctx.systemPrompt.section({
+    name: 'self-iteration:forge_plugin',
+    order: SELF_ITERATION_SECTION_ORDER,
+    text: () => selfIterationSectionText(),
+  })
   ctx.logger.info('plugin-forge 已加载：forge_plugin 工具与 /forge status 命令可用（targetRoot=%s）', merged.targetRoot)
 }
 
@@ -129,6 +144,8 @@ export {
   cleanupStaleStaging,
   assertNoRegistryHarnessDeps,
   verifyBuildInTarget,
+  selfIterationSectionText,
+  SELF_ITERATION_SECTION_ORDER,
   type ChildReport,
   type ForgeArgs,
   type ForgeLogger,

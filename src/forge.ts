@@ -69,6 +69,28 @@ export interface ForgeConfig {
   readonly referenceRepos: string[]
   /** staging 目录保留天数；超过则在下一次 forge 调用时清理；0 = 不清理。 */
   readonly stagingTtlDays: number
+  /** 迁移并提交成功后自动装入的 profile 名（如 'web'）；留空 = 不自动安装。 */
+  readonly installProfile: string
+}
+
+/** 自迭代引导 section 的渲染顺序（紧随 tool-subagent 的 116.5 之后）。 */
+export const SELF_ITERATION_SECTION_ORDER = 117
+
+/**
+ * 面向 agent 的自迭代策略（systemPrompt section，随每次提示词组装渲染）。
+ * 让 agent 在需要新能力时**自发**调用 forge_plugin，而不是等用户明确要求。
+ */
+export function selfIterationSectionText(): string {
+  return [
+    '你是 DSH 的自迭代智能体：`forge_plugin` 工具允许你按需生成/更新 DSH 插件来扩展自身能力，',
+    '**可自发调用，无需等用户明确说"做插件"**。出现以下情况时主动考虑调用：',
+    '1. 用户提出的功能/需求需要新工具、新命令或新的自动化能力，而当前工具集没有对应实现；',
+    '2. 使用中反复遇到同一类限制或缺失（可复用、跨会话的能力缺口）；',
+    '3. 需要把某个流程固化为可复用插件（定时、批处理、UI 增强等）。',
+    '调用策略：一次迭代一个清晰的小功能（不要一次生成多个）；需求不清晰时先做合理假设并在结果中说明；',
+    '生成并验证成功后如用户希望立即使用，可传 `install: true` 自动装入 profile（需配置 installProfile）。',
+    '本工具会启动子代理、需要网络、耗时数分钟，调用期间可继续其他工作；完成后可用 `/forge status` 查询已建仓库。',
+  ].join('')
 }
 
 const TOOL_NAME = 'forge_plugin'
@@ -106,6 +128,8 @@ export interface ForgeArgs {
   readonly targetRoot?: string
   readonly migrate?: boolean
   readonly update?: boolean
+  /** 迁移并提交成功后是否自动装入 profile（需配置 installProfile）。 */
+  readonly install?: boolean
 }
 
 /** runForge 的成功/失败结果（工具 output.schema 的结构化值）。 */
@@ -119,6 +143,8 @@ export interface ForgeToolResult {
   readonly files: string[]
   readonly childReport?: string
   readonly error?: string
+  /** 是否已自动装入 profile（install: true 且配置了 installProfile）。 */
+  readonly installed?: boolean
 }
 
 /** 子代理启动请求（runForge 注入点）。 */
@@ -202,6 +228,7 @@ function renderResult(value: JsonValue): string {
     build?: string
     childReport?: string
     error?: string
+    installed?: boolean
   }
   const lines: string[] = []
   if (result.ok === true) {
@@ -209,6 +236,7 @@ function renderResult(value: JsonValue): string {
     if (result.migratedTo !== undefined) lines.push(`📦 独立仓库：${result.migratedTo}`)
     if (result.commitSubject !== undefined) lines.push(`🔖 功能完成提交：${result.commitSubject}`)
     lines.push(`🛠 目标目录构建验证：${result.build ?? 'skipped'}`)
+    if (result.installed === true) lines.push('⚙️ 已自动装入 profile，重启后立即可用。')
     const report = result.childReport
     if (report !== undefined && report.trim() !== '') {
       lines.push(`\n子代理汇报：\n${report.trim().slice(0, 4000)}`)
@@ -408,6 +436,7 @@ async function runForgeLocked(options: RunForgeOptions, name: string): Promise<F
   let committed = false
   let commitSubject: string | undefined
   let build = 'skipped'
+  let installed = false
   if (migrate) {
     migratedTo = target
     await copyInto(staging, migratedTo)
@@ -462,6 +491,21 @@ async function runForgeLocked(options: RunForgeOptions, name: string): Promise<F
     if (committed && config.push) {
       await runCommand('git', ['push'], { cwd: migratedTo, timeoutMs: config.childTimeoutMs })
     }
+    // 自迭代闭环：install: true 且配置了 installProfile 时，装入 profile 立即可用。
+    // 默认关闭（不擅自修改用户 profile 配置）。
+    if (args.install === true && config.installProfile.trim() !== '') {
+      const install = await runCommand(
+        'dsh',
+        ['plugin', '--profile', config.installProfile.trim(), 'add', `link:${migratedPath}`],
+        { cwd: migratedTo, timeoutMs: config.childTimeoutMs },
+      )
+      if (install.code !== 0) {
+        logger?.warn('forge_plugin: 装入 profile 失败 %s：%s', name, install.stderr.trim())
+      } else {
+        installed = true
+        logger?.info('forge_plugin: 已装入 profile %s：%s', config.installProfile.trim(), migratedPath)
+      }
+    }
   }
 
   // 6. 收尾：保留 staging（默认）供排查。
@@ -478,6 +522,7 @@ async function runForgeLocked(options: RunForgeOptions, name: string): Promise<F
     build,
     files,
     childReport: report === undefined ? child.text.slice(0, 2000) : report.notes ?? '',
+    installed,
   }
 }
 
@@ -485,7 +530,7 @@ async function runForgeLocked(options: RunForgeOptions, name: string): Promise<F
 export function registerForgeTool(ctx: Context, config: ForgeConfig): () => void {
   return ctx.tools.register(defineTool({
     name: TOOL_NAME,
-    description: '按需求生成 DSH 插件：启动一个新 Agent，在临时目录按姐妹插件仓库规范开发并构建验证插件；完成后迁移为 targetRoot 下的独立 git 仓库，并在功能完成时立即做一次英文 Conventional Commit（非定时提交）；仓库登记进 $DSH_HOME/plugin-forge.json（可用 /forge status 查询）。注意：本工具会启动子代理、需要网络（pnpm install），单次可能耗时数分钟到数十分钟。',
+    description: '按需求生成 DSH 插件，用于 agent 自迭代：当会话需要新工具/命令/自动化能力时，可自发调用本工具（无需用户明确要求"做插件"）。流程：启动一个新 Agent，在临时目录按姐妹插件仓库规范开发并构建验证插件；完成后迁移为 targetRoot 下的独立 git 仓库，并在功能完成时立即做一次英文 Conventional Commit（非定时提交）；仓库登记进 $DSH_HOME/plugin-forge.json（可用 /forge status 查询）。传 install: true 可自动装入 profile（需配置 installProfile）。注意：本工具会启动子代理、需要网络（pnpm install），单次可能耗时数分钟到数十分钟。',
     parameters: {
       requirement: {
         type: 'string',
@@ -508,6 +553,10 @@ export function registerForgeTool(ctx: Context, config: ForgeConfig): () => void
         type: 'boolean',
         description: '目标目录已存在时是否允许更新（默认 false：已存在则报错，避免误覆盖）。',
       },
+      install: {
+        type: 'boolean',
+        description: '迁移并提交成功后是否自动装入 profile 立即可用（默认 false；需配置 installProfile）。',
+      },
     },
     output: {
       schema: {
@@ -523,6 +572,7 @@ export function registerForgeTool(ctx: Context, config: ForgeConfig): () => void
           files: { type: 'array', items: { type: 'string' }, required: true },
           childReport: { type: 'string' },
           error: { type: 'string' },
+          installed: { type: 'boolean' },
         },
       },
       render: (_args, value) => [{ type: 'text', text: renderResult(value) }],
