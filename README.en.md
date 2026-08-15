@@ -4,6 +4,10 @@
 
 An AI-native DSH plugin generator. The AI calls `forge_plugin` while executing tasks: a subagent builds the plugin → it is migrated to an independent git repo under `project-root/dsh-plugins/<name>` (English Conventional Commit on feature completion) → hot-mounted into the current session.
 
+## Bootstrapping
+
+Built on the everything-is-a-plugin idea and agent self-iteration, this repo is already bootstrapped: plugins forged by `forge_plugin` (e.g. dsh-code-review) review the generator's own source in turn, and multiple fix commits are driven by that review (e.g. 9c50e31, 07dc333, 5feeff8).
+
 中文: [README.md](README.md)
 
 ## Tool `forge_plugin`
