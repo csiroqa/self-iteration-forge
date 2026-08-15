@@ -78,7 +78,7 @@ staging → 子代理开发（typecheck/test/build）→ 重复检测 → 迁移
 
 ## 质量门
 
-staging 内 typecheck/test/build → 迁移后目标 `pnpm install && pnpm build` → main/types 存在 → 拒绝 registry 版 `@deepseek-ai/*` → **加载冒烟**（真实 cordis Context 执行 apply，拦截 apply 期崩溃——真实事故：命令 `input.hint` 为空导致 DSH 启动即崩）→ 提交前检查 diff。
+staging 内 typecheck/test/build → 迁移后目标 `pnpm install && pnpm build` → main/types 存在 → 拒绝 registry 版 `@deepseek-ai/*` → **加载冒烟**（真实 cordis Context 执行 apply，拦截 apply 期崩溃——真实事故：命令 `input.hint` 为空导致 DSH 启动即崩）→ **内置名冲突拦截**（工具名与 DSH 内置工具同名时跨 scope 注册不报错但模型侧遮蔽——真实事故：`probe_echo`；加载冒烟与热挂载双重拦截）→ 提交前检查 diff。
 
 ## 安装
 

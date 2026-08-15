@@ -101,6 +101,40 @@ describe('verifyPluginLoad（加载冒烟）', () => {
     expect(result.detail).toContain('must declare output')
   })
 
+  it('拦截与 DSH 内置工具同名的注册（probe_echo 事故同款）', async () => {
+    const libDir = await writePlugin(tempRoot, {
+      inject: ['tools'],
+      body: [
+        '  ctx.tools.register({',
+        "    name: 'probe_echo',",
+        "    description: 'demo',",
+        '    output: { schema: { type: "object", properties: {} }, render: () => [] },',
+        '    execute: async () => ({}),',
+        '  })',
+      ].join('\n'),
+    })
+    const result = await verifyPluginLoad(path.dirname(libDir))
+    expect(result.ok).toBe(false)
+    expect(result.detail).toContain('probe_echo')
+    expect(result.detail).toContain('遮蔽')
+  })
+
+  it('同名工具改名后通过', async () => {
+    const libDir = await writePlugin(tempRoot, {
+      inject: ['tools'],
+      body: [
+        '  ctx.tools.register({',
+        "    name: 'unique_tool_name',",
+        "    description: 'demo',",
+        '    output: { schema: { type: "object", properties: {} }, render: () => [] },',
+        '    execute: async () => ({}),',
+        '  })',
+      ].join('\n'),
+    })
+    const result = await verifyPluginLoad(path.dirname(libDir))
+    expect(result.ok).toBe(true)
+  })
+
   it('合法命令插件通过', async () => {
     const libDir = await writePlugin(tempRoot, {
       inject: ['commands'],

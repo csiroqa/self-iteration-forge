@@ -78,7 +78,7 @@ The guidance section does not inject a plugin list (saves context). The subagent
 
 ## Quality gates
 
-typecheck/test/build in staging → `pnpm install && pnpm build` in the target after migration → main/types existence check → reject registry-versioned `@deepseek-ai/*` deps → **load smoke** (run `apply` on a real cordis Context; catches apply-time crashes — real incident: an empty command `input.hint` crashed DSH at boot) → diff checked after staging before commit.
+typecheck/test/build in staging → `pnpm install && pnpm build` in the target after migration → main/types existence check → reject registry-versioned `@deepseek-ai/*` deps → **load smoke** (run `apply` on a real cordis Context; catches apply-time crashes — real incident: an empty command `input.hint` crashed DSH at boot) → **builtin-name conflict guard** (a tool named like a DSH builtin registers cross-scope without error but shadows on the model side — real incident: `probe_echo`; enforced at both load smoke and hot-mount) → diff checked before commit.
 
 ## Install
 

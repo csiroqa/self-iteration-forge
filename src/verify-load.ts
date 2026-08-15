@@ -12,6 +12,7 @@
 import { Context, type Fiber } from '@deepseek-ai/cordis'
 import path from 'node:path'
 import { loadPluginLib, normalizeInject } from './hotmount.ts'
+import { BUILTIN_TOOL_NAMES } from './builtin-names.ts'
 
 /** dsh-commands 的命令名校验（与 normalizeDefinition 一致）。 */
 const COMMAND_NAME = /^[a-z][a-z0-9_-]*$/u
@@ -57,6 +58,21 @@ function assertToolDefinition(def: unknown): void {
   }
 }
 
+/**
+ * 内置名冲突检查：插件工具名与 DSH 内置工具同名时，跨 scope 注册不报错
+ * （dsh-tools 只拦截同 scope 重名）但模型侧遮蔽（真实事故：probe_echo）。
+ * 在交付前拦截，阻止生成同名工具。
+ */
+function assertNoBuiltinConflict(def: unknown): void {
+  if (typeof def !== 'object' || def === null) return
+  const name = (def as { name?: unknown }).name
+  if (typeof name === 'string' && BUILTIN_TOOL_NAMES.has(name)) {
+    throw new TypeError(
+      `tool "${name}" 与 DSH 内置工具同名：跨 scope 注册不会报错但模型侧会发生遮蔽（已阻止交付，请改名）`,
+    )
+  }
+}
+
 /** 加载冒烟结果（skipped 视为 ok，由构建检查补充）。 */
 export interface VerifyLoadResult {
   readonly ok: boolean
@@ -90,6 +106,7 @@ export async function verifyPluginLoad(dir: string): Promise<VerifyLoadResult> {
   ctx.provide('tools', {
     register: (def: unknown) => {
       assertToolDefinition(def)
+      assertNoBuiltinConflict(def)
       return () => {}
     },
   })

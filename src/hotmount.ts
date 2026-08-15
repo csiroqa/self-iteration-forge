@@ -4,6 +4,7 @@ import { stat } from 'node:fs/promises'
 import { pathToFileURL } from 'node:url'
 import path from 'node:path'
 import { pathExists } from './migrate.ts'
+import { BUILTIN_TOOL_NAMES } from './builtin-names.ts'
 
 /** 热挂载结果（失败不抛出，detail 给用户可操作说明）。 */
 export interface HotMountResult {
@@ -66,14 +67,36 @@ export async function mountPlugin(ctx: Context, dir: string): Promise<HotMountRe
         }
       }
     }
+    // 内置名冲突拦截：插件注册与 DSH 内置工具同名的工具时，跨 scope 注册
+    // 不报错但模型侧遮蔽（真实事故：probe_echo）。包装 register 在挂载期拦截。
+    const toolsService = ctx.get('tools') as { register?: (definition: unknown) => unknown } | undefined
+    let originalRegister: ((definition: unknown) => unknown) | undefined
+    if (toolsService !== undefined && typeof toolsService.register === 'function') {
+      originalRegister = toolsService.register.bind(toolsService)
+      toolsService.register = (definition: unknown) => {
+        const name = (definition as { name?: unknown }).name
+        if (typeof name === 'string' && BUILTIN_TOOL_NAMES.has(name)) {
+          throw new TypeError(
+            `tool "${name}" 与 DSH 内置工具同名：跨 scope 注册不会报错但模型侧会发生遮蔽（已阻止热挂载，请改名后 update=true 重试）`,
+          )
+        }
+        return originalRegister!(definition)
+      }
+    }
     // 挂载并等待 fiber 完成：apply 的同步/异步错误在此被捕获，
     // 注入依赖的子 fiber（如 ctx.inject 快捷方式）也在 await 期间收敛。
-    await ctx.plugin({
-      name: mod.name ?? path.basename(dir),
-      ...(mod.inject !== undefined ? { inject: mod.inject } : {}),
-      ...(mod.Config !== undefined ? { Config: mod.Config } : {}),
-      apply: mod.apply,
-    })
+    try {
+      await ctx.plugin({
+        name: mod.name ?? path.basename(dir),
+        ...(mod.inject !== undefined ? { inject: mod.inject } : {}),
+        ...(mod.Config !== undefined ? { Config: mod.Config } : {}),
+        apply: mod.apply,
+      })
+    } finally {
+      if (toolsService !== undefined && originalRegister !== undefined) {
+        toolsService.register = originalRegister
+      }
+    }
     return { ok: true }
   } catch (error) {
     return { ok: false, detail: error instanceof Error ? error.message : String(error) }

@@ -24,7 +24,7 @@ afterEach(async () => {
 })
 
 /** 生成一个极简插件 lib/index.js（模拟已构建的 host 半区）。 */
-async function writeFixture(dir: string, opts: { name: string; inject?: string[]; fail?: boolean }): Promise<string> {
+async function writeFixture(dir: string, opts: { name: string; inject?: string[]; fail?: boolean; toolName?: string }): Promise<string> {
   const libDir = path.join(dir, 'lib')
   await mkdir(libDir, { recursive: true })
   const injectJson = JSON.stringify(opts.inject ?? ['commands'])
@@ -35,7 +35,16 @@ async function writeFixture(dir: string, opts: { name: string; inject?: string[]
         `export const inject = ${injectJson}`,
         'export function apply(ctx) {',
         '  // inject 已由插件声明提供，apply 可直接访问 ctx.commands。',
-        '  ctx.commands.register({ name: "hi", description: "hi", handler: () => ({ kind: "success", text: "hi" }) })',
+        ...(opts.toolName !== undefined
+          ? [
+              '  ctx.tools.register({',
+              `    name: ${JSON.stringify(opts.toolName)},`,
+              '    description: "demo",',
+              '    output: { schema: { type: "object", properties: {} }, render: () => [] },',
+              '    execute: async () => ({}),',
+              '  })',
+            ]
+          : ['  ctx.commands.register({ name: "hi", description: "hi", handler: () => ({ kind: "success", text: "hi" }) })']),
         '}',
         '',
       ].join('\n')
@@ -99,5 +108,30 @@ describe('mountPlugin（真实 cordis Context）', () => {
     const result = await mountPlugin(ctx, path.dirname(libDir))
     expect(result.ok).toBe(false)
     expect(result.detail).toContain('apply 爆炸')
+  })
+
+  it('注册与内置工具同名的工具被拒绝（probe_echo 事故同款）', async () => {
+    const libDir = await writeFixture(tempRoot, { name: 'shadow', inject: ['tools'], toolName: 'probe_echo' })
+    const ctx = new Context()
+    ctx.provide('tools', { register: () => () => {} })
+    const result = await mountPlugin(ctx, path.dirname(libDir))
+    expect(result.ok).toBe(false)
+    expect(result.detail).toContain('probe_echo')
+    expect(result.detail).toContain('遮蔽')
+  })
+
+  it('非内置同名工具正常挂载', async () => {
+    const libDir = await writeFixture(tempRoot, { name: 'fresh', inject: ['tools'], toolName: 'fresh_tool_name' })
+    const ctx = new Context()
+    const registered: string[] = []
+    ctx.provide('tools', {
+      register: (definition: { name: string }) => {
+        registered.push(definition.name)
+        return () => {}
+      },
+    })
+    const result = await mountPlugin(ctx, path.dirname(libDir))
+    expect(result.ok).toBe(true)
+    expect(registered).toEqual(['fresh_tool_name'])
   })
 })

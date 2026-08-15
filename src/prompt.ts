@@ -1,5 +1,6 @@
 /** 子代理提示词构建：需求 + 姐妹仓库规范 + AGENTS.md + 环境约束 + REPORT 格式。 */
 import { toPosix } from './utils.ts'
+import { BUILTIN_TOOL_NAMES } from './builtin-names.ts'
 
 /** 构建子代理提示词所需的上下文。 */
 export interface ChildPromptContext {
@@ -103,6 +104,7 @@ deepseek-harness 检出位于 ${toPosix(harnessRoot)}。从交付目录到它的
    - 若部分重叠但有明确新增价值：正常开发，并在 REPORT 的 \`notes\` 中说明与哪个插件重叠、差异是什么。
 1. 用 read/glob/grep 通读参考仓库与所需 API 源码，确认工具链与格式细节。
 2. 设计插件：功能、注入的服务、配置项、是否需要浏览器半区、注册哪些工具/命令。
+   - **工具名冲突检查**：defineTool 的工具名不得与宿主内置工具重名（跨 scope 注册不报错但模型侧遮蔽）。宿主内置工具清单：${[...BUILTIN_TOOL_NAMES].sort().join('、')}。命令名同理避免与宿主已有命令重复。
 3. 在交付目录创建全部文件（文件清单见「仓库格式」）。
 4. 安装依赖：pnpm install（必要时加 --store-dir / --ignore-scripts）。
 5. 构建验证：pnpm typecheck、pnpm test（如写了测试）、pnpm build，修复到全部通过；脚本不存在的检查如实标注 skipped。
