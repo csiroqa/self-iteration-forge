@@ -27,6 +27,7 @@ import type { SubagentResult, SubagentRun } from '@deepseek-ai/dsh-subagent'
 import { mkdir, readFile, readdir, rm, stat } from 'node:fs/promises'
 import path from 'node:path'
 import { commitStaged, ensureGitRepo, stageAll } from './git.ts'
+import { mountPlugin } from './hotmount.ts'
 import { copyInto, ensureGitignore, pathExists, rewriteCiHarnessPaths, rewriteHarnessLinks, syncRemoveStale } from './migrate.ts'
 import { buildChildPrompt } from './prompt.ts'
 import { loadRegistry, upsertRepo, type ForgeRepoEntry } from './registry.ts'
@@ -82,13 +83,14 @@ export const SELF_ITERATION_SECTION_ORDER = 117
  */
 export function selfIterationSectionText(): string {
   return [
-    '你是 DSH 的自迭代智能体：`forge_plugin` 工具允许你按需生成/更新 DSH 插件来扩展自身能力，',
-    '**可自发调用，无需等用户明确说"做插件"**。出现以下情况时主动考虑调用：',
-    '1. 用户提出的功能/需求需要新工具、新命令或新的自动化能力，而当前工具集没有对应实现；',
-    '2. 使用中反复遇到同一类限制或缺失（可复用、跨会话的能力缺口）；',
-    '3. 需要把某个流程固化为可复用插件（定时、批处理、UI 增强等）。',
-    '调用策略：一次迭代一个清晰的小功能（不要一次生成多个）；需求不清晰时先做合理假设并在结果中说明；',
-    '生成并验证成功后如用户希望立即使用，可传 `install: true` 自动装入 profile（需配置 installProfile）。',
+    '你是 DSH 的自迭代智能体：`forge_plugin` 工具允许你按需生成/更新 DSH 插件来扩展自身能力。',
+    '**在正常描述需求的工作中自发发现并调用**（无需用户明确说"做插件"）：',
+    '1. 当前功能值得作为插件固化（重复出现、跨会话复用、可独立成小工具）；',
+    '2. 需要使用当前没有的能力（工具集/命令集缺口）；',
+    '3. 作为单个插件不会太重（保持小而专一；太重就拆成多个）。',
+    '调用策略：一次迭代一个清晰的小功能（不要一次生成多个）；需求不清晰时先做合理假设并在结果中说明。',
+    '交付后**无缝切换**：传 `hot: true` 立即热挂载到当前运行时（无需重启，当前会话马上可用）；',
+    '如需重启后也生效，再传 `install: true` 装入 profile（需配置 installProfile）。',
     '本工具会启动子代理、需要网络、耗时数分钟，调用期间可继续其他工作；完成后可用 `/forge status` 查询已建仓库。',
   ].join('')
 }
@@ -130,6 +132,8 @@ export interface ForgeArgs {
   readonly update?: boolean
   /** 迁移并提交成功后是否自动装入 profile（需配置 installProfile）。 */
   readonly install?: boolean
+  /** 迁移并提交成功后是否热挂载到当前运行时（无缝切换，无需重启）。 */
+  readonly hot?: boolean
 }
 
 /** runForge 的成功/失败结果（工具 output.schema 的结构化值）。 */
@@ -145,6 +149,10 @@ export interface ForgeToolResult {
   readonly error?: string
   /** 是否已自动装入 profile（install: true 且配置了 installProfile）。 */
   readonly installed?: boolean
+  /** 是否已热挂载到当前运行时（hot: true）。 */
+  readonly hotMounted?: boolean
+  /** 热挂载失败原因（hot: true 但未能挂载时）。 */
+  readonly hotDetail?: string
 }
 
 /** 子代理启动请求（runForge 注入点）。 */
@@ -229,6 +237,8 @@ function renderResult(value: JsonValue): string {
     childReport?: string
     error?: string
     installed?: boolean
+    hotMounted?: boolean
+    hotDetail?: string
   }
   const lines: string[] = []
   if (result.ok === true) {
@@ -237,6 +247,11 @@ function renderResult(value: JsonValue): string {
     if (result.commitSubject !== undefined) lines.push(`🔖 功能完成提交：${result.commitSubject}`)
     lines.push(`🛠 目标目录构建验证：${result.build ?? 'skipped'}`)
     if (result.installed === true) lines.push('⚙️ 已自动装入 profile，重启后立即可用。')
+    if (result.hotMounted === true) {
+      lines.push('⚡ 已热挂载到当前运行时：无需重启，本会话立即可以使用新能力。')
+    } else if (result.hotDetail !== undefined) {
+      lines.push(`⚠️ 热挂载未完成：${result.hotDetail}`)
+    }
     const report = result.childReport
     if (report !== undefined && report.trim() !== '') {
       lines.push(`\n子代理汇报：\n${report.trim().slice(0, 4000)}`)
@@ -530,7 +545,7 @@ async function runForgeLocked(options: RunForgeOptions, name: string): Promise<F
 export function registerForgeTool(ctx: Context, config: ForgeConfig): () => void {
   return ctx.tools.register(defineTool({
     name: TOOL_NAME,
-    description: '按需求生成 DSH 插件，用于 agent 自迭代：当会话需要新工具/命令/自动化能力时，可自发调用本工具（无需用户明确要求"做插件"）。流程：启动一个新 Agent，在临时目录按姐妹插件仓库规范开发并构建验证插件；完成后迁移为 targetRoot 下的独立 git 仓库，并在功能完成时立即做一次英文 Conventional Commit（非定时提交）；仓库登记进 $DSH_HOME/plugin-forge.json（可用 /forge status 查询）。传 install: true 可自动装入 profile（需配置 installProfile）。注意：本工具会启动子代理、需要网络（pnpm install），单次可能耗时数分钟到数十分钟。',
+    description: '按需求生成 DSH 插件，用于 agent 自迭代：在正常工作中发现功能值得固化、或需要当前没有的能力、且作为单个插件不会太重时，可自发调用本工具（无需用户明确要求"做插件"）。流程：启动一个新 Agent，在临时目录按姐妹插件仓库规范开发并构建验证插件；完成后迁移为 targetRoot 下的独立 git 仓库，并在功能完成时立即做一次英文 Conventional Commit（非定时提交）；仓库登记进 $DSH_HOME/plugin-forge.json（可用 /forge status 查询）。无缝切换：传 hot: true 立即热挂载到当前运行时（无需重启，本会话马上可用）；传 install: true 自动装入 profile（需配置 installProfile）。注意：本工具会启动子代理、需要网络（pnpm install），单次可能耗时数分钟到数十分钟。',
     parameters: {
       requirement: {
         type: 'string',
@@ -555,7 +570,11 @@ export function registerForgeTool(ctx: Context, config: ForgeConfig): () => void
       },
       install: {
         type: 'boolean',
-        description: '迁移并提交成功后是否自动装入 profile 立即可用（默认 false；需配置 installProfile）。',
+        description: '迁移并提交成功后是否自动装入 profile 立即可用（默认 false；需配置 installProfile，重启后生效）。',
+      },
+      hot: {
+        type: 'boolean',
+        description: '迁移并提交成功后是否热挂载到当前运行时（默认 false；true = 无缝切换，当前会话立即获得新工具/命令，无需重启）。',
       },
     },
     output: {
@@ -573,6 +592,8 @@ export function registerForgeTool(ctx: Context, config: ForgeConfig): () => void
           childReport: { type: 'string' },
           error: { type: 'string' },
           installed: { type: 'boolean' },
+          hotMounted: { type: 'boolean' },
+          hotDetail: { type: 'string' },
         },
       },
       render: (_args, value) => [{ type: 'text', text: renderResult(value) }],
@@ -609,7 +630,7 @@ export function registerForgeTool(ctx: Context, config: ForgeConfig): () => void
         return collectChild(run)
       }
 
-      return runForge({
+      const result = await runForge({
         config,
         workspace,
         harnessRoot,
@@ -618,6 +639,17 @@ export function registerForgeTool(ctx: Context, config: ForgeConfig): () => void
         startChild,
         logger: ctx.logger,
       })
+      // 无缝切换：hot: true 时把新插件热挂载到当前运行时（无需重启）。
+      if (args.hot === true && result.ok && result.migratedTo !== undefined) {
+        const mount = await mountPlugin(ctx, result.migratedTo)
+        if (mount.ok) {
+          ctx.logger.info('forge_plugin: 已热挂载 %s 到当前运行时', result.migratedTo)
+          return { ...result, hotMounted: true }
+        }
+        ctx.logger.warn('forge_plugin: 热挂载失败 %s：%s', result.migratedTo, mount.detail ?? '')
+        return { ...result, hotMounted: false, hotDetail: mount.detail }
+      }
+      return result
     },
   }))
 }

@@ -17,7 +17,8 @@ A **plugin forge** for DeepSeek Harness (DSH): exposes the `forge_plugin` tool s
 | `targetRoot` | no | Root directory for independent repos; defaults to the configured `targetRoot` (`D:/2-OGP`) |
 | `migrate` | no | Whether to migrate into an independent git repo and commit (default `true`) |
 | `update` | no | Whether updating an existing target directory is allowed (default `false`, prevents accidental overwrite) |
-| `install` | no | Whether to auto-install into the profile after migration+commit (default `false`; requires `installProfile` config) |
+| `install` | no | Whether to auto-install into the profile after migration+commit (default `false`; requires `installProfile` config; takes effect after restart) |
+| `hot` | no | Whether to hot-mount into the current runtime after migration+commit (default `false`; `true` = seamless switch, the current session gets the new tool/command immediately without restart) |
 
 Pipeline:
 
@@ -39,13 +40,14 @@ Call `forge_plugin` again with `update: true` to update an existing repo (update
 - Files the child removes from the staging directory are **synced out of the target repo** during migration (no leftovers)
 - The update is committed immediately and the commit count is incremented
 
-## Self-iteration: agents call the forge spontaneously
+## Self-iteration: agents call the forge spontaneously (full loop)
 
-The plugin registers a **self-iteration guidance section** in the system prompt, so agents **spontaneously** call `forge_plugin` when they need new capabilities (no explicit "build a plugin" request required):
+The plugin registers a **self-iteration guidance section** in the system prompt defining the complete loop:
 
-- A user need requires new tools/commands/automation the current toolset lacks → proactively generate a plugin
-- Repeated limitations during use (reusable, cross-session capability gaps) → generate a plugin
-- An existing plugin falls short → iterate with `update: true`
+1. **Discover**: while working through normal requirements, the LLM notices that a feature is worth fixing as a plugin (recurring, cross-session reuse), or a needed capability is missing, and it fits as a single lightweight plugin
+2. **Call spontaneously**: proactively call `forge_plugin` (no explicit "build a plugin" request required)
+3. **Deliver**: a subagent develops → build verified → migrated to an independent repo → committed on completion
+4. **Seamless switch**: pass `hot: true` to hot-mount into the current runtime — the session gains the new capability immediately (no restart); pass `install: true` as well to persist across restarts
 
 ## Self-iteration workflow example (design intent)
 

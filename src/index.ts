@@ -152,4 +152,5 @@ export {
   type ForgeToolResult,
   type StartChild,
 } from './forge.ts'
+export { mountPlugin, type HotMountResult } from './hotmount.ts'
 export { buildChildPrompt, type ChildPromptContext } from './prompt.ts'

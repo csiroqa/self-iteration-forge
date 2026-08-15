@@ -19,7 +19,8 @@ English: [README.en.md](README.en.md)
 | `targetRoot` | 否 | 独立仓库所在根目录；缺省用配置的 `targetRoot`（默认 `D:/2-OGP`） |
 | `migrate` | 否 | 是否迁移为独立 git 仓库并提交（默认 `true`） |
 | `update` | 否 | 目标目录已存在时是否允许更新（默认 `false`，防误覆盖） |
-| `install` | 否 | 迁移并提交成功后是否自动装入 profile 立即可用（默认 `false`；需配置 `installProfile`） |
+| `install` | 否 | 迁移并提交成功后是否自动装入 profile 立即可用（默认 `false`；需配置 `installProfile`，重启后生效） |
+| `hot` | 否 | 迁移并提交成功后是否**热挂载**到当前运行时（默认 `false`；`true` = 无缝切换，当前会话立即获得新工具/命令，无需重启） |
 
 执行流程：
 
@@ -35,6 +36,7 @@ English: [README.en.md](README.en.md)
    - 目标目录重新 `pnpm install && pnpm build` 验证迁移结果
 4. **功能完成即提交**：`git init`（如无）→ `git add -A` → 检查 diff → 有变更则提交一次英文 Conventional Commit（如 `feat: web-search-memo: add keyword search for session memos`）；不 push（除非配置显式开启）
 5. 登记进 `$DSH_HOME/plugin-forge.json`（原子写入）
+6. **无缝切换（`hot: true`）**：动态 import 新插件的 `lib/index.js`（cache-busting 防模块缓存）并 `ctx.plugin()` 挂载到当前运行时——当前会话下一轮即可使用新工具/命令，**无需重启**；挂载前校验插件声明的 inject 服务当前运行时可用，不可用则拒绝并提示改走 `install: true`
 
 ### /forge status
 
@@ -54,13 +56,14 @@ plugin-forge 已创建的插件仓库（1 个）：
 - 子代理在交付目录删除的文件，迁移时会**同步删除**目标仓库中的对应文件（防残留）
 - 更新完成后同样立即提交一次并累计提交次数
 
-## 自迭代：agent 自发调用
+## 自迭代：agent 自发调用（完整流程）
 
-插件加载时会在系统提示词注册**自迭代引导节**，让 agent 在需要新能力时**自发**调用 `forge_plugin`（无需用户明确说"做插件"）：
+插件加载时会在系统提示词注册**自迭代引导节**，定义完整闭环：
 
-- 用户需求需要新工具/命令/自动化而当前工具集没有 → 主动生成插件
-- 使用中反复遇到同一类限制（可复用、跨会话的能力缺口）→ 生成插件
-- 既有插件能力不足 → `update: true` 增量迭代
+1. **发现**：LLM 在正常描述需求的工作中发现——当前功能值得作为插件固化（重复出现、跨会话复用）、或需要使用当前没有的能力、且作为单个插件不会太重
+2. **自发调用**：主动 call `forge_plugin`（无需用户明确说"做插件"）
+3. **交付**：子代理开发 → 构建验证 → 迁移独立仓库 → 功能完成即提交
+4. **无缝切换**：传 `hot: true` 立即热挂载到当前运行时，本会话马上可用新能力（无需重启）；需要重启后也生效再传 `install: true` 装入 profile
 
 ## 自迭代工作流示例（设计意图）
 
@@ -137,18 +140,7 @@ node scripts/llm-e2e-host.mjs prompt demo-greet "D:\2-OGP\dsh-plugin\.forge-stag
 # 2) 把提示词交给一个真实 LLM 子代理执行（staging 目录内开发 + 构建验证）
 # 3) 子代理完成后执行宿主侧全流程（迁移/link+CI 改写/构建/git 提交/登记）
 node scripts/llm-e2e-host.mjs run demo-greet "D:\2-OGP\dsh-plugin\.forge-staging\demo-greet" "D:/2-OGP" "D:/2-OGP/deepseek-harness" "feat: demo-greet: ……"
-# 4) 更新既有仓库：prompt 加第 7 参数 update，run 加 --update
-node scripts/llm-e2e-host.mjs prompt demo-greet <stagingDir> "D:/2-OGP" "D:/2-OGP/deepseek-harness" "给 /greet 加 --time 参数……" update
-node scripts/llm-e2e-host.mjs run demo-greet <stagingDir> "D:/2-OGP" "D:/2-OGP/deepseek-harness" "feat: demo-greet: ……" --update
 ```
-
-### 已执行的真实用例（实测记录）
-
-| 用例 | 需求 | 产物 | 结果 |
-| --- | --- | --- | --- |
-| 新建（命令类） | `/greet` 中文问候 + 配置 | `D:/2-OGP/demo-greet` | ✅ 3 提交（feat/fix/feat），24 单测，已装入 profile |
-| 更新（命令类） | `/greet` 增加 `--time`/`--repeat` | 同上 | ✅ update 链路：预填充→增量→同步删除→提交累计 2 次 |
-| 新建（工具类） | `current_time` 工具（defineTool） | `D:/2-OGP/time-utils` | ✅ 1 提交，7 单测，lib 加载与工具逻辑冒烟通过 |
 
 ## 设计意图：agent 自迭代
 
