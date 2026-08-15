@@ -70,10 +70,9 @@ export const SELF_ITERATION_SECTION_ORDER = 117
 /** 自迭代引导节（systemPrompt section，随每次提示词组装渲染）。 */
 export function selfIterationSectionText(): string {
   return [
-    '你是 DSH 的自迭代智能体：能力不足时用 `forge_plugin` 生成插件补齐，无需用户要求。',
-    '执行任务时若缺少所需工具、只能手工重复处理、或发现可跨会话复用的功能（且规模合适），应调用 `forge_plugin` 生成插件，将其视为任务的一部分，而不是仅给出建议。',
-    '生成后自动热挂载，本会话内即可使用；能力跨会话保留。',
-    '重复需求使用 update=true 迭代，子代理会自动检测重复。',
+    '你是 DSH 的自迭代智能体：能力不足时用 `forge_plugin` 生成插件补齐。',
+    '执行任务时若缺少所需工具、只能手工重复处理、或发现可跨会话复用的功能，应调用 `forge_plugin` 生成插件。',
+    '生成后自动热挂载。重复需求使用 update=true 迭代，子代理自动检测重复。',
   ].join('')
 }
 
@@ -259,7 +258,7 @@ function renderResult(value: JsonValue): string {
     lines.push(`构建验证：${result.build ?? 'skipped'}`)
     if (result.installed === true) lines.push('已装入 profile，重启后生效。')
     if (result.hotMounted === true) {
-      lines.push('已热挂载到当前运行时，本会话立即可用。')
+      lines.push('已热挂载到当前运行时。')
     } else if (result.hotDetail !== undefined) {
       lines.push(`热挂载未完成：${result.hotDetail}`)
     }
@@ -516,7 +515,7 @@ async function runForgeLocked(options: RunForgeOptions, name: string): Promise<F
     if (!load.ok) {
       logger?.warn('forge_plugin: 加载冒烟未通过 %s：%s', name, load.detail ?? '')
       throw new Error(
-        `加载冒烟未通过（该插件可能导致 DSH 启动崩溃，已阻止交付）：${load.detail ?? ''}`
+        `加载冒烟未通过，已阻止交付：${load.detail ?? ''}`
         + `\n请修复 apply 期错误后重试（staging 保留在 ${toPosix(staging)}，目标目录为 ${toPosix(migratedTo)}，重试带 update=true）。`,
       )
     }
@@ -586,7 +585,7 @@ async function runForgeLocked(options: RunForgeOptions, name: string): Promise<F
 export function registerForgeTool(ctx: Context, config: ForgeConfig): () => void {
   return ctx.tools.register(defineTool({
     name: TOOL_NAME,
-    description: '按需生成 DSH 插件（agent 自迭代）：执行任务时若缺少所需工具、只能手工重复处理、或发现值得固化的功能（且规模合适），应调用本工具生成插件（无需用户要求），并将其视为任务的一部分而非仅给出建议。流程：子代理开发构建 → 迁移为「项目根/dsh-plugins/<name>」独立 git 仓库 → 功能完成即提交（英文 Conventional Commit）→ 自动热挂载（本会话立即可用）→ 登记（/forge status 可查）。子代理自动检测重复：已存在则拒绝新建并返回 existingName，改用 update=true 迭代。install:true 装入 profile。耗时数分钟、需网络。',
+    description: '按需生成 DSH 插件：子代理开发构建，迁移为「项目根/dsh-plugins/<name>」独立 git 仓库，功能完成即提交（英文 Conventional Commit），自动热挂载，登记（/forge status 可查）。子代理自动检测重复，已存在则返回 existingName，改用 update=true 迭代。install:true 装入 profile。耗时数分钟、需网络。',
     parameters: {
       requirement: {
         type: 'string',
@@ -607,15 +606,15 @@ export function registerForgeTool(ctx: Context, config: ForgeConfig): () => void
       },
       update: {
         type: 'boolean',
-        description: '更新既有仓库（默认 false，防误覆盖）。',
+        description: '更新既有仓库（默认 false）。',
       },
       install: {
         type: 'boolean',
-        description: '装入 profile（默认 false；需配置 installProfile，重启后生效）。',
+        description: '装入 profile（默认 false；需配置 installProfile）。',
       },
       hot: {
         type: 'boolean',
-        description: '热挂载到当前运行时（默认 true：生成后自动挂载，本会话立即可用；传 false 可关闭）。',
+        description: '热挂载到当前运行时（默认 true；false 关闭）。',
       },
     },
     output: {
