@@ -1,5 +1,5 @@
 /** 通用工具函数（纯 Node，无外部依赖）：命令执行、命名、路径计算。 */
-import { execFile } from 'node:child_process'
+import { spawn } from 'node:child_process'
 import { homedir } from 'node:os'
 import path from 'node:path'
 
@@ -71,7 +71,13 @@ function resolveSpawn(
   return { file: bin, args: [...args], verbatim: false }
 }
 
-/** 运行外部命令并完整捕获输出（host 半区代码，非沙箱 shell）。 */
+/**
+ * 运行外部命令并完整捕获输出（host 半区代码，非沙箱 shell）。
+ *
+ * 用 spawn 而非 execFile：超时/取消时除 kill 直接子进程外，Windows 下额外
+ * 用 taskkill /T /F 递归终止整个进程树——cmd.exe 只是中转壳，其子启的
+ * pnpm/node 必须一并清理，否则会留下孤儿进程与中间态（B03）。
+ */
 export function runCommand(
   bin: string,
   args: readonly string[],
@@ -79,36 +85,85 @@ export function runCommand(
 ): Promise<ExecResult> {
   const { file, args: spawnArgs, verbatim } = resolveSpawn(bin, args)
   return new Promise<ExecResult>((resolve, reject) => {
-    execFile(
-      file,
-      spawnArgs,
-      {
+    let child: ReturnType<typeof spawn>
+    try {
+      child = spawn(file, spawnArgs, {
         cwd: options.cwd,
         windowsHide: true,
         windowsVerbatimArguments: verbatim,
-        timeout: options.timeoutMs ?? DEFAULT_CMD_TIMEOUT_MS,
-        maxBuffer: CMD_MAX_BUFFER,
-        signal: options.signal,
-      },
-      (error, stdout, stderr) => {
-        if (error === null) {
-          resolve({ code: 0, stdout, stderr })
-          return
+        stdio: ['ignore', 'pipe', 'pipe'],
+      })
+    } catch (error) {
+      reject(new SpawnError(`${bin} 无法启动：${error instanceof Error ? error.message : String(error)}`))
+      return
+    }
+    let stdout = ''
+    let stderr = ''
+    let settled = false
+    const finish = (fn: () => void): void => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      options.signal?.removeEventListener('abort', onAbort)
+      fn()
+    }
+    // 超时 / 取消：先杀进程树（Windows taskkill /T），再杀直接子进程。
+    const killTree = (): void => {
+      if (process.platform === 'win32' && child.pid !== undefined) {
+        try {
+          spawn('taskkill', ['/PID', String(child.pid), '/T', '/F'], {
+            windowsHide: true,
+            stdio: 'ignore',
+          })
+        } catch {
+          // 进程可能已退出，忽略。
         }
-        // 输出超过 maxBuffer：execFile 以 ERR_MAX_BUFFER 终止。
-        if (error instanceof Error && 'code' in error && error.code === 'ERR_MAX_BUFFER') {
+      }
+      child.kill()
+    }
+    const timer = setTimeout(() => {
+      finish(() => {
+        killTree()
+        reject(new SpawnError(`${bin} 超时（${options.timeoutMs ?? DEFAULT_CMD_TIMEOUT_MS}ms），已终止进程树`))
+      })
+    }, options.timeoutMs ?? DEFAULT_CMD_TIMEOUT_MS)
+    const onAbort = (): void => {
+      finish(() => {
+        killTree()
+        reject(new SpawnError(`${bin} 被取消（AbortSignal），已终止进程树`))
+      })
+    }
+    if (options.signal !== undefined) {
+      if (options.signal.aborted) onAbort()
+      else options.signal.addEventListener('abort', onAbort, { once: true })
+    }
+
+    child.stdout?.on('data', (chunk: Buffer) => {
+      stdout += chunk.toString('utf8')
+      if (stdout.length > CMD_MAX_BUFFER) {
+        finish(() => {
+          killTree()
           reject(new SpawnError(`${bin} 输出超过 ${CMD_MAX_BUFFER / 1024 / 1024}MB 缓冲上限，命令被终止`))
-          return
-        }
-        const code = typeof error.code === 'number' ? error.code : -1
-        if (code === -1) {
-          // 进程级失败（ENOENT / EPERM / 超时 / 信号 / 取消）。
-          reject(new SpawnError(`${bin} 无法启动、被取消或超时：${error.message}`))
-          return
-        }
-        resolve({ code, stdout, stderr })
-      },
-    )
+        })
+      }
+    })
+    child.stderr?.on('data', (chunk: Buffer) => {
+      stderr += chunk.toString('utf8')
+      if (stderr.length > CMD_MAX_BUFFER) {
+        finish(() => {
+          killTree()
+          reject(new SpawnError(`${bin} 输出超过 ${CMD_MAX_BUFFER / 1024 / 1024}MB 缓冲上限，命令被终止`))
+        })
+      }
+    })
+    child.on('error', (error) => {
+      // 进程级失败（ENOENT / EPERM 等）。
+      finish(() => reject(new SpawnError(`${bin} 无法启动：${error.message}`)))
+    })
+    child.on('close', (code) => {
+      // 超时/取消/缓冲超限已在 finish 中处理；此处只处理正常结束。
+      finish(() => resolve({ code: typeof code === 'number' ? code : -1, stdout, stderr }))
+    })
   })
 }
 

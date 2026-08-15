@@ -7,8 +7,8 @@ export interface GitIdentity {
   readonly email: string
 }
 
-/** 目录是否已是 git 工作树。 */
-export async function isGitRepo(dir: string): Promise<boolean> {
+/** 目录是否已是 git 工作树（模块内使用）。 */
+async function isGitRepo(dir: string): Promise<boolean> {
   const result = await runCommand('git', ['rev-parse', '--is-inside-work-tree'], { cwd: dir })
   return result.code === 0 && result.stdout.trim() === 'true'
 }
@@ -20,14 +20,15 @@ export async function ensureGitRepo(dir: string): Promise<void> {
 }
 
 /**
- * 仓库（含全局）是否已配置作者身份；未配置时返回应注入的回退身份。
+ * 仓库（含全局）是否已配置作者身份；未配置或值为空时返回应注入的回退身份。
  * 用单次 git config --list 读取 user.name/user.email，避免两次子进程。
+ * 只认"键 + 非空值"，空值配置视为未配置（否则 git commit 会报 user.name 为空）。
  */
-export async function resolveIdentity(dir: string, fallback: GitIdentity): Promise<GitIdentity | undefined> {
+async function resolveIdentity(dir: string, fallback: GitIdentity): Promise<GitIdentity | undefined> {
   const result = await runCommand('git', ['config', '--list'], { cwd: dir })
   if (result.code !== 0) return fallback
-  const hasName = /(^|\n)user\.name=/.test(`\n${result.stdout}`)
-  const hasEmail = /(^|\n)user\.email=/.test(`\n${result.stdout}`)
+  const hasName = /(?:^|\n)user\.name=.+\S/.test(`\n${result.stdout}`)
+  const hasEmail = /(?:^|\n)user\.email=.+\S/.test(`\n${result.stdout}`)
   return hasName && hasEmail ? undefined : fallback
 }
 

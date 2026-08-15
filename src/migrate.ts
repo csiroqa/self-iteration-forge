@@ -1,10 +1,57 @@
 /** 迁移落地：复制独立仓库、改写 deepseek-harness link/CI 路径、补齐 .gitignore、更新同步删除。 */
+import { createHash } from 'node:crypto'
 import { access, cp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
-import { relativeLink } from './utils.ts'
+import { relativeLink, toPosix } from './utils.ts'
 
 /** 复制时排除的目录（node_modules 体积大且可在目标目录重建）。 */
 export const EXCLUDED_BASENAMES = new Set(['node_modules', '.git', '.pnpm-store'])
+
+/**
+ * 差异拷贝：把 source 中相对 target 内容不同的文件复制过去，目录结构自动补齐。
+ * 用内容 SHA-1 判定（而非 mtime/size——update 流程先整树预填充 staging，
+ * mtime 全部变新，纯元数据比较会退化为全量复制，P02）。
+ * 返回复制的文件数。node_modules/.git/.pnpm-store 与复制语义一致被排除。
+ */
+export async function copyChangedInto(source: string, target: string): Promise<number> {
+  let copied = 0
+  const walk = async (dir: string): Promise<void> => {
+    let entries
+    try {
+      entries = await readdir(dir, { withFileTypes: true })
+    } catch {
+      return
+    }
+    for (const entry of entries) {
+      if (EXCLUDED_BASENAMES.has(entry.name)) continue
+      const srcFull = path.join(dir, entry.name)
+      const rel = path.relative(source, srcFull)
+      const tgtFull = path.join(target, rel)
+      if (entry.isDirectory()) {
+        await walk(srcFull)
+        continue
+      }
+      const same = await filesEqual(srcFull, tgtFull)
+      if (!same) {
+        await mkdir(path.dirname(tgtFull), { recursive: true })
+        await cp(srcFull, tgtFull, { force: true })
+        copied += 1
+      }
+    }
+  }
+  await walk(source)
+  return copied
+}
+
+/** 两个文件内容是否相同（target 缺失视为不同；读失败视为不同）。 */
+async function filesEqual(a: string, b: string): Promise<boolean> {
+  try {
+    const [aText, bText] = await Promise.all([readFile(a), readFile(b)])
+    return createHash('sha1').update(aText).digest('hex') === createHash('sha1').update(bText).digest('hex')
+  } catch {
+    return false
+  }
+}
 
 /** 同步删除时保护的目录（仓库元数据与构建产物/依赖，不做源文件同步）。 */
 const SYNC_PROTECTED_BASENAMES = new Set(['.git', 'node_modules', '.pnpm-store', 'lib', 'dist'])
@@ -108,6 +155,10 @@ export async function ensureGitignore(dir: string): Promise<void> {
  * （git clone 目标、working-directory 等），使其从 staging 深度对齐到
  * 目标目录深度——与 package.json 的 link: 改写配套，否则 CI 会 clone
  * 到错误位置。返回被替换的路径出现次数；文件不存在或无匹配返回 0。
+ *
+ * 支持 `../`（posix）、`..\`（Windows 反斜杠）、`./`、`/` 相对前缀与
+ * 裸 `deepseek-harness` 引用等形态（B02：旧正则只匹配 `../` 前斜杠，
+ * Windows 风格引用会静默漏改）。
  */
 export async function rewriteCiHarnessPaths(ciPath: string, toDir: string, harnessRoot: string): Promise<number> {
   let text: string
@@ -116,7 +167,11 @@ export async function rewriteCiHarnessPaths(ciPath: string, toDir: string, harne
   } catch {
     return 0
   }
-  const pattern = /(\.\.\/)+deepseek-harness/g
+  // 两分支：
+  // 1) 相对前缀形态：`../`、`..\`、`./`、`../../`（任意层），如 `../../../deepseek-harness`；
+  // 2) 裸引用形态：`deepseek-harness` 直接位于 `:` 或 `=` 之后（如 `working-directory: deepseek-harness`），
+  //    不匹配 step 显示名（`- name: Checkout deepseek-harness`）与 URL 片段（`https://…/deepseek-harness`）。
+  const pattern = /(?:\.{1,2}[/\\])+deepseek-harness|(?<=[:=]\s*)deepseek-harness/g
   const occurrences = text.match(pattern) ?? []
   if (occurrences.length === 0) return 0
   // relativeLink 已经是以 deepseek-harness 结尾的完整相对路径，直接整体替换，
@@ -130,9 +185,29 @@ export async function rewriteCiHarnessPaths(ciPath: string, toDir: string, harne
  * 删除 target 中存在但 source 中不存在的文件（更新同步语义）。
  * .git / node_modules / .pnpm-store / lib / dist 受保护，不做同步删除；
  * 空目录一并清理。返回删除的文件数量。
+ *
+ * 优化（P03）：先一次性枚举 source 的相对路径集合，同步阶段改用 O(1)
+ * 集合查询，替代逐文件 access() 系统调用（旧实现约 N 次 fs 往返）。
  */
 export async function syncRemoveStale(source: string, target: string): Promise<number> {
   let removed = 0
+  // 预收集 source 的相对路径集合（正斜杠、跳过受保护目录，与 listRelativeFiles 一致）。
+  const sourceSet = new Set<string>()
+  const collect = async (dir: string, prefix: string): Promise<void> => {
+    let entries
+    try {
+      entries = await readdir(dir, { withFileTypes: true })
+    } catch {
+      return
+    }
+    for (const entry of entries) {
+      if (SYNC_PROTECTED_BASENAMES.has(entry.name)) continue
+      const rel = prefix === '' ? entry.name : `${prefix}/${entry.name}`
+      if (entry.isDirectory()) await collect(path.join(dir, entry.name), rel)
+      else sourceSet.add(rel)
+    }
+  }
+  await collect(source, '')
   const walk = async (dir: string): Promise<void> => {
     let entries
     try {
@@ -143,21 +218,20 @@ export async function syncRemoveStale(source: string, target: string): Promise<n
     for (const entry of entries) {
       if (SYNC_PROTECTED_BASENAMES.has(entry.name)) continue
       const targetFull = path.join(dir, entry.name)
-      const rel = path.relative(target, targetFull)
-      const sourceFull = path.join(source, rel)
+      const rel = toPosix(path.relative(target, targetFull))
       if (entry.isDirectory()) {
         await walk(targetFull)
         // 子目录处理完后，若为空且 source 无对应文件，删除该空目录。
         try {
           const remaining = await readdir(targetFull)
-          if (remaining.length === 0 && !(await pathExists(sourceFull))) {
+          if (remaining.length === 0 && !hasSourcePrefix(sourceSet, rel)) {
             await rm(targetFull, { recursive: true, force: true })
             removed += 1
           }
         } catch {
           // 已被并发清理或不存在，忽略。
         }
-      } else if (!(await pathExists(sourceFull))) {
+      } else if (!sourceSet.has(rel)) {
         await rm(targetFull, { force: true })
         removed += 1
       }
@@ -165,4 +239,13 @@ export async function syncRemoveStale(source: string, target: string): Promise<n
   }
   await walk(target)
   return removed
+}
+
+/** source 集合中是否存在以 dirRel 为前缀的文件（用于空目录判定，O(N) 前缀扫描）。 */
+function hasSourcePrefix(sourceSet: Set<string>, dirRel: string): boolean {
+  const prefix = dirRel === '' ? '' : `${dirRel}/`
+  for (const rel of sourceSet) {
+    if (rel.startsWith(prefix)) return true
+  }
+  return false
 }

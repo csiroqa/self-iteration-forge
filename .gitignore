@@ -5,6 +5,9 @@ node_modules/
 lib/
 dist/
 
+# Forge staging (local scratch; keep out of git)
+.forge-staging/
+
 # TypeScript
 *.tsbuildinfo
 

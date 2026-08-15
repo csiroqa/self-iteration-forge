@@ -180,6 +180,9 @@ function makeConfig(): ForgeConfig {
     referenceRepos: [],
     stagingTtlDays: 0,
     installProfile: '',
+    // 默认值语义：自动装入当前 profile；本测试的 DSH_HOME 无 profiles 目录，
+    // 探测失败 → installDetail 提示、不阻塞交付（下方有断言）。
+    autoInstall: true,
   }
 }
 
@@ -220,6 +223,10 @@ describe('runForge 端到端（假子代理 + 真实迁移/构建/git）', () =>
     expect(result.commitSubject).toBe('feat: demo-mini: add minimal demo plugin')
     expect(result.build).toBe('passed')
     expect(result.files).toContain('src/index.ts')
+    // autoInstall 默认语义：探测当前 profile（本测试 DSH_HOME 无 profiles 目录）
+    // 失败 → installed=false + installDetail 提示，不阻塞交付。
+    expect(result.installed).toBe(false)
+    expect(result.installDetail).toContain('未探测到当前 profile')
     // 防回归：返回值必须是无损 JSON（工具注册表会以此校验，undefined 字段会失败）。
     expect(snapshotJsonValue(result)).toBeDefined()
 

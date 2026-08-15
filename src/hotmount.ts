@@ -1,5 +1,6 @@
 /** 运行时热挂载：动态 import 插件 lib 并 ctx.plugin 挂载（cache-busting；缺服务拒绝；失败不抛出）。 */
 import type { Context, Plugin } from '@deepseek-ai/cordis'
+import { stat } from 'node:fs/promises'
 import { pathToFileURL } from 'node:url'
 import path from 'node:path'
 import { pathExists } from './migrate.ts'
@@ -10,21 +11,21 @@ export interface HotMountResult {
   readonly detail?: string
 }
 
-/** 进程内单调自增序号：与时间戳组合成唯一 cache-bust 后缀（避免同毫秒命中 ESM 缓存）。 */
-let mountSeq = 0
-
-/** 归一化插件声明的 inject（字符串/数组/对象三种形态 → 服务名数组）。 */
-export function normalizeInject(inject: unknown): string[] | undefined {
+/** 归一化插件的 inject 声明（string | string[] | Record → string[]；缺省 undefined）。 */
+export function normalizeInject(inject: Plugin.Object['inject']): string[] | undefined {
   if (inject === undefined || inject === null) return undefined
   if (typeof inject === 'string') return [inject]
-  if (Array.isArray(inject)) return inject.filter((name): name is string => typeof name === 'string')
-  if (typeof inject === 'object') return Object.keys(inject)
-  return undefined
+  if (Array.isArray(inject)) return inject
+  return Object.keys(inject)
 }
 
 /**
- * 动态加载已迁移插件的 lib/index.js（cache-busting 保证更新后强制新实例）。
+ * 动态加载已迁移插件的 lib/index.js（内容感知 cache-busting）。
  * 返回模块或失败原因（失败不抛出）。成功时 apply 已收窄为函数。
+ *
+ * 版本号用文件 mtimeMs+size 而非每次唯一后缀（B05/P01）：文件内容未变时
+ * URL 保持不变 → 复用 ESM 模块缓存（不累积模块条目）；内容变化（如重新
+ * 构建、update 迭代）时才生成新 URL → 强制加载新实例。
  */
 export async function loadPluginLib(
   dir: string,
@@ -35,8 +36,10 @@ export async function loadPluginLib(
     return { detail: `lib/index.js 不存在：${path.join(dir, 'lib')}` }
   }
   try {
-    // cache-busting：同一路径反复 import 命中 ESM 缓存，更新后必须强制新实例。
-    const url = `${pathToFileURL(libPath).href}?${tag}=${Date.now()}-${mountSeq++}`
+    const meta = await stat(libPath)
+    // 内容感知版本：mtimeMs 毫秒级 + size 字节，内容变化必变。
+    const version = `${meta.mtimeMs}-${meta.size}`
+    const url = `${pathToFileURL(libPath).href}?${tag}=${version}`
     const mod = (await import(url)) as Partial<Plugin.Object>
     if (typeof mod.apply !== 'function') {
       return { detail: '模块缺少 apply 导出（不是有效的插件入口）' }

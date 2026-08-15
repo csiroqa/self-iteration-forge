@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { ensureGitignore, rewriteCiHarnessPaths, rewriteHarnessLinks, syncRemoveStale } from './migrate.ts'
-import { assertNoRegistryHarnessDeps, cleanupStaleStaging, parseChildReport, resolveTargetRoot } from './forge.ts'
+import { assertNoRegistryHarnessDeps, cleanupStaleStaging, parseChildReport, resolveTargetRoot, shouldInstall, type ForgeConfig } from './forge.ts'
 import { commitStaged, ensureGitRepo, stageAll } from './git.ts'
 import { loadRegistry, saveRegistry } from './registry.ts'
 import {
@@ -283,7 +283,8 @@ describe('resolveTargetRoot（迁移目标解析）', () => {
     referenceRepos: [],
     stagingTtlDays: 0,
     installProfile: '',
-  }
+    autoInstall: true,
+  } satisfies ForgeConfig
 
   it('默认解析到项目根（工作区父目录）/dsh-plugins', () => {
     // 工作区 D:/work/proj/dsh-plugin → 父目录 D:/work/proj/dsh-plugins（与工作区平级）。
@@ -303,6 +304,41 @@ describe('resolveTargetRoot（迁移目标解析）', () => {
       { ...base, targetRoot: 'D:/repos' },
       'D:/work/proj',
     )).toBe(path.resolve('D:/explicit'))
+  })
+})
+
+describe('shouldInstall（install 参数三态）', () => {
+  const cfg = (autoInstall: boolean): ForgeConfig => ({
+    targetRoot: '',
+    stagingRoot: '',
+    harnessRoot: '',
+    subagentProvider: 'spawn',
+    maxChildDepth: 2,
+    childTimeoutMs: 2_700_000,
+    commitType: 'feat',
+    push: false,
+    gitAuthorName: 'x',
+    gitAuthorEmail: 'y@z',
+    keepStaging: true,
+    referenceRepos: [],
+    stagingTtlDays: 0,
+    installProfile: '',
+    autoInstall,
+  })
+
+  it('缺省跟随 autoInstall', () => {
+    expect(shouldInstall({ requirement: 'x' }, cfg(true))).toBe(true)
+    expect(shouldInstall({ requirement: 'x' }, cfg(false))).toBe(false)
+  })
+
+  it('install: false 显式关闭（即使 autoInstall=true）', () => {
+    expect(shouldInstall({ requirement: 'x', install: false }, cfg(true))).toBe(false)
+    expect(shouldInstall({ requirement: 'x', install: false }, cfg(false))).toBe(false)
+  })
+
+  it('install: true 强制装入（即使 autoInstall=false）', () => {
+    expect(shouldInstall({ requirement: 'x', install: true }, cfg(true))).toBe(true)
+    expect(shouldInstall({ requirement: 'x', install: true }, cfg(false))).toBe(true)
   })
 })
 

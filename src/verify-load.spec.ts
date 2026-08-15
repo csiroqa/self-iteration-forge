@@ -5,11 +5,16 @@
  * 验证 apply 期错误（命令 input.hint 为空、description 为空、工具缺 output）
  * 能被 verifyPluginLoad 捕获——这正是"构建通过但 DSH 启动即崩"的拦截层。
  */
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { verifyPluginLoad } from './verify-load.ts'
+import { findHarnessRoot } from './utils.ts'
+
+/** 仓库根（本文件在 src/ 下）。 */
+const REPO_ROOT = path.resolve(fileURLToPath(new URL('../', import.meta.url)))
 
 let tempRoot: string
 
@@ -131,5 +136,37 @@ describe('verifyPluginLoad（加载冒烟）', () => {
     expect(result.ok).toBe(false)
     expect(result.detail).toContain('apply 期错误')
     expect(result.detail).toContain('apply 阶段爆炸')
+  })
+})
+
+describe('harness 复刻规则一致性（M06）', () => {
+  it('COMMAND_NAME 正则与 deepseek-harness 真身逐字一致', async () => {
+    const harnessRoot = await findHarnessRoot(process.cwd())
+    const src = await readFile(
+      path.join(harnessRoot, 'packages', 'interaction', 'commands', 'src', 'index.ts'),
+      'utf8',
+    )
+    // 提取真身 COMMAND_NAME 正则字面量，与本地复刻比对。
+    const truth = src.match(/const COMMAND_NAME = (\S+)/)?.[1]
+    expect(truth).toBeDefined()
+    // 本地复刻：verify-load.ts 的 COMMAND_NAME 行。
+    const local = (await readFile(path.join(REPO_ROOT, 'src', 'verify-load.ts'), 'utf8'))
+      .match(/const COMMAND_NAME = (\S+)/)?.[1]
+    expect(local).toBe(truth)
+  })
+
+  it('hint/description 错误消息与真身一致（放行/拦截口径不漂移）', async () => {
+    const harnessRoot = await findHarnessRoot(process.cwd())
+    const src = await readFile(
+      path.join(harnessRoot, 'packages', 'interaction', 'commands', 'src', 'index.ts'),
+      'utf8',
+    )
+    const truthHint = src.match(/input hint must be a string/) !== null
+    const truthEmpty = src.match(/input hint must not be empty/) !== null
+    const local = await readFile(path.join(REPO_ROOT, 'src', 'verify-load.ts'), 'utf8')
+    expect(truthHint).toBe(true)
+    expect(truthEmpty).toBe(true)
+    expect(local).toContain('input hint must be a string')
+    expect(local).toContain('input hint must not be empty')
   })
 })

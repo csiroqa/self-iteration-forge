@@ -9,7 +9,7 @@
  * 正则与错误消息需逐字一致）；harness 侧改动规则时需同步本文件，
  * 建议在 CI 中加一条"与 harness 规则一致性"对照测试。
  */
-import { Context } from '@deepseek-ai/cordis'
+import { Context, type Fiber } from '@deepseek-ai/cordis'
 import path from 'node:path'
 import { loadPluginLib, normalizeInject } from './hotmount.ts'
 
@@ -94,10 +94,11 @@ export async function verifyPluginLoad(dir: string): Promise<VerifyLoadResult> {
     },
   })
 
+  let fiber: Fiber | undefined
   try {
     // mod.apply 已在上方收窄为 function；此处按 cordis Plugin.Object 契约断言。
     const apply = mod.apply as (ctx: Context) => unknown
-    await ctx.plugin({
+    fiber = await ctx.plugin({
       name: mod.name ?? path.basename(dir),
       ...(mod.inject !== undefined ? { inject: mod.inject } : {}),
       apply,
@@ -108,5 +109,9 @@ export async function verifyPluginLoad(dir: string): Promise<VerifyLoadResult> {
       ok: false,
       detail: `apply 期错误：${error instanceof Error ? `${error.name}: ${error.message}` : String(error)}`,
     }
+  } finally {
+    // B01：释放冒烟用的临时 Context（事件发射器/fiber/服务条目等资源），
+    // 防止长驻宿主多次 forge 交付时累积未回收的 Context。
+    if (fiber !== undefined) await fiber.dispose().catch(() => undefined)
   }
 }

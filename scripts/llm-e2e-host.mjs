@@ -116,8 +116,8 @@ if (mode === 'run') {
     installProfile: '',
   }
   const build = await verifyBuildInTarget(target, config)
-  if (build !== 'passed') {
-    throw new Error(`迁移后构建验证失败：${build}`)
+  if (!build.ok) {
+    throw new Error(`迁移后构建验证失败：${build.detail ?? '未知原因'}`)
   }
   console.log('      构建验证通过')
 

@@ -14,12 +14,14 @@ import { mkdir, readFile, readdir, rm, stat } from 'node:fs/promises'
 import path from 'node:path'
 import { commitStaged, ensureGitRepo, stageAll } from './git.ts'
 import { mountPlugin } from './hotmount.ts'
-import { copyInto, ensureGitignore, EXCLUDED_BASENAMES, pathExists, rewriteCiHarnessPaths, rewriteHarnessLinks, syncRemoveStale } from './migrate.ts'
+import { copyChangedInto, copyInto, ensureGitignore, EXCLUDED_BASENAMES, pathExists, rewriteCiHarnessPaths, rewriteHarnessLinks, syncRemoveStale } from './migrate.ts'
 import { verifyPluginLoad } from './verify-load.ts'
 import { buildChildPrompt } from './prompt.ts'
+import { detectActiveProfile } from './profile.ts'
 import { loadRegistry, upsertRepo, type ForgeRepoEntry } from './registry.ts'
 import {
   buildCommitSubject,
+  dshHome,
   findHarnessRoot,
   normalizePluginName,
   relativeLink,
@@ -61,8 +63,14 @@ export interface ForgeConfig {
   readonly referenceRepos: string[]
   /** staging 目录保留天数；超过则在下一次 forge 调用时清理；0 = 不清理。 */
   readonly stagingTtlDays: number
-  /** 迁移并提交成功后自动装入的 profile 名（如 'web'）；留空 = 不自动安装。 */
+  /** 迁移并提交成功后自动装入的 profile 名（如 'web'）；留空 = 自动探测当前 profile。 */
   readonly installProfile: string
+  /**
+   * 迁移并提交成功后自动装入当前 profile（默认 true）。
+   * agent 不能自发重启：热挂载覆盖本会话，profile 装入覆盖重启后。
+   * install: false 参数可关闭本次调用。
+   */
+  readonly autoInstall: boolean
 }
 
 /** 自迭代引导 section 的渲染顺序（紧随 tool-subagent 的 116.5 之后）。 */
@@ -103,14 +111,11 @@ export interface ChildOutcome {
   readonly text: string
 }
 
-/** 从 REPORT 块解析出的关键字段（与 prompt.ts 的 REPORT 协议逐项对应）。 */
+/** 从 REPORT 块解析出的关键字段（与 prompt.ts 的 REPORT 协议逐项对应，只保留有消费者的字段）。 */
 export interface ChildReport {
   summaryZh?: string
   summaryEn?: string
-  files?: string
   notes?: string
-  /** 是否需要浏览器半区（prompt 协议 requires_client 字段）。 */
-  requiresClient?: boolean
   /** 子代理检测到需求与已有插件重复时，填已有插件名（此时不开发）。 */
   duplicateOf?: string
   /** 重复检测说明（重叠点/差异）。 */
@@ -124,7 +129,7 @@ export interface ForgeArgs {
   readonly targetRoot?: string
   readonly migrate?: boolean
   readonly update?: boolean
-  /** 迁移并提交成功后是否自动装入 profile（需配置 installProfile）。 */
+  /** 装入 profile：缺省跟随 autoInstall（默认自动装入当前 profile）；false 关闭；true 强制。 */
   readonly install?: boolean
   /** 迁移并提交成功后是否热挂载到当前运行时（无需重启）。 */
   readonly hot?: boolean
@@ -141,8 +146,10 @@ export interface ForgeToolResult {
   readonly files: string[]
   readonly childReport?: string
   readonly error?: string
-  /** 是否已自动装入 profile（install: true 且配置了 installProfile）。 */
+  /** 是否已装入 profile（重启后生效）。 */
   readonly installed?: boolean
+  /** 未装入 profile 的原因（尝试过但探测失败/命令失败时）。 */
+  readonly installDetail?: string
   /** 是否已热挂载到当前运行时（hot: true）。 */
   readonly hotMounted?: boolean
   /** 热挂载失败原因（hot: true 但未能挂载时）。 */
@@ -198,9 +205,7 @@ export function parseChildReport(text: string): ChildReport | undefined {
     const value = line.slice(sep + 1).trim()
     if (key === 'summary_zh') report.summaryZh = value
     else if (key === 'summary_en') report.summaryEn = value
-    else if (key === 'files') report.files = value
     else if (key === 'notes') report.notes = value
-    else if (key === 'requires_client') report.requiresClient = value.trim().toLowerCase() === 'true'
     else if (key === 'duplicate_of') report.duplicateOf = value
     else if (key === 'duplicate_note') report.duplicateNote = value
   }
@@ -249,7 +254,11 @@ function renderResult(value: JsonValue): string {
     if (result.migratedTo !== undefined) lines.push(`仓库：${result.migratedTo}`)
     if (result.commitSubject !== undefined) lines.push(`提交：${result.commitSubject}`)
     lines.push(`构建验证：${result.build ?? 'skipped'}`)
-    if (result.installed === true) lines.push('已装入 profile，重启后生效。')
+    if (result.installed === true) {
+      lines.push('已装入 profile，重启后生效。')
+    } else if (result.installDetail !== undefined) {
+      lines.push(`未装入 profile：${result.installDetail}`)
+    }
     if (result.hotMounted === true) {
       lines.push('已热挂载到当前运行时。')
     } else if (result.hotDetail !== undefined) {
@@ -266,12 +275,18 @@ function renderResult(value: JsonValue): string {
   return lines.join('\n')
 }
 
-/** 在目标目录重新安装并构建，验证迁移结果；返回 'passed' 或失败原因。 */
+/** 构建验证结果（结构化契约，与 verifyPluginLoad 的 { ok, detail } 一致，M07）。 */
+export interface BuildVerifyResult {
+  readonly ok: boolean
+  readonly detail?: string
+}
+
+/** 在目标目录重新安装并构建，验证迁移结果。返回 { ok, detail }；ok=false 时 detail 为失败原因。 */
 export async function verifyBuildInTarget(
   target: string,
   config: ForgeConfig,
   signal?: AbortSignal,
-): Promise<string> {
+): Promise<BuildVerifyResult> {
   try {
     await runCommand('pnpm', ['install'], { cwd: target, timeoutMs: config.childTimeoutMs, signal })
     await runCommand('pnpm', ['build'], { cwd: target, timeoutMs: config.childTimeoutMs, signal })
@@ -292,12 +307,12 @@ export async function verifyBuildInTarget(
         }
       }
       if (missing.length > 0) {
-        return `failed: package.json 声明的 ${missing.join('、')} 不存在（构建产物与声明不一致）`
+        return { ok: false, detail: `package.json 声明的 ${missing.join('、')} 不存在（构建产物与声明不一致）` }
       }
     }
-    return 'passed'
+    return { ok: true }
   } catch (error) {
-    return `failed: ${error instanceof Error ? error.message : String(error)}`
+    return { ok: false, detail: error instanceof Error ? error.message : String(error) }
   }
 }
 
@@ -399,6 +414,15 @@ export async function runForge(options: RunForgeOptions): Promise<ForgeToolResul
   }
 }
 
+/** 准备 staging：清理重建；update 模式预填充目标现有源码（子代理增量修改）。 */
+async function prepareStaging(staging: string, target: string, mode: 'create' | 'update'): Promise<void> {
+  await rm(staging, { recursive: true, force: true })
+  await mkdir(staging, { recursive: true })
+  if (mode === 'update') {
+    await copyInto(target, staging)
+  }
+}
+
 /** runForge 的持锁主体（name 已归一化且互斥已获取）。 */
 async function runForgeLocked(options: RunForgeOptions, name: string): Promise<ForgeToolResult> {
   const { config, workspace, harnessRoot, args, signal, startChild, logger } = options
@@ -424,13 +448,8 @@ async function runForgeLocked(options: RunForgeOptions, name: string): Promise<F
   const mode: 'create' | 'update' = update && targetExists ? 'update' : 'create'
   logger?.info('forge_plugin: 开始%s插件 %s（staging=%s）', mode === 'update' ? '更新' : '生成', name, toPosix(staging))
 
-  // 2. 清理并重建 staging。
-  await rm(staging, { recursive: true, force: true })
-  await mkdir(staging, { recursive: true })
-  // 更新模式：预填充现有源码，子代理只需增量修改（省去重读重写全部文件）。
-  if (mode === 'update') {
-    await copyInto(target, staging)
-  }
+  // 2. 准备 staging（清理重建；update 模式预填充现有源码，子代理只需增量修改）。
+  await prepareStaging(staging, target, mode)
 
   // 3. 启动子代理开发。
   const promptText = buildChildPrompt({
@@ -484,8 +503,10 @@ async function runForgeLocked(options: RunForgeOptions, name: string): Promise<F
   let migratedTo: string | undefined
   let committed = false
   let commitSubject: string | undefined
+  // 工具结果用字符串概括构建验证（'passed' / 'skipped' / 'failed'）；详见 MigrateOutcome.build。
   let build = 'skipped'
   let installed = false
+  let installDetail: string | undefined
   if (migrate) {
     const outcome = await migrateAndCommit({
       config,
@@ -503,8 +524,9 @@ async function runForgeLocked(options: RunForgeOptions, name: string): Promise<F
     migratedTo = outcome.migratedTo
     committed = outcome.committed
     commitSubject = outcome.commitSubject
-    build = outcome.build
+    build = outcome.build.ok ? 'passed' : 'failed'
     installed = outcome.installed
+    installDetail = outcome.installDetail
   }
 
   // 6. 收尾：保留 staging（默认）供排查。
@@ -522,6 +544,7 @@ async function runForgeLocked(options: RunForgeOptions, name: string): Promise<F
     files,
     childReport: report === undefined ? truncateTail(child.text, TEXT_TAIL) : truncateTail(report.notes ?? '', TEXT_TAIL),
     installed,
+    installDetail,
   })
 }
 
@@ -530,8 +553,10 @@ export interface MigrateOutcome {
   readonly migratedTo: string
   readonly committed: boolean
   readonly commitSubject?: string
-  readonly build: string
+  /** 构建验证结果（ok=true 表示通过）。 */
+  readonly build: BuildVerifyResult
   readonly installed: boolean
+  readonly installDetail?: string
 }
 
 /** migrateAndCommit 的输入。 */
@@ -565,10 +590,13 @@ export async function migrateAndCommit(options: MigrateOptions): Promise<Migrate
     )
   }
 
-  await copyInto(staging, migratedTo)
-  // 更新模式：同步删除目标中 staging 已不存在的源文件（防残留）。
+  // update 模式：差异回写（只拷 staging 相对 target 变化的内容，P02），
+  // 再同步删除 target 中 staging 已不存在的源文件（防残留）。
   if (mode === 'update') {
+    await copyChangedInto(staging, migratedTo)
     await syncRemoveStale(staging, migratedTo)
+  } else {
+    await copyInto(staging, migratedTo)
   }
   const packageJson = path.join(migratedTo, 'package.json')
   if (await pathExists(packageJson)) {
@@ -583,10 +611,10 @@ export async function migrateAndCommit(options: MigrateOptions): Promise<Migrate
   )
   await ensureGitignore(migratedTo)
   const build = await verifyBuildInTarget(migratedTo, config, signal)
-  if (build !== 'passed') {
-    logger?.warn('forge_plugin: 迁移后构建验证失败 %s：%s', name, build)
+  if (!build.ok) {
+    logger?.warn('forge_plugin: 迁移后构建验证失败 %s：%s', name, build.detail ?? '')
     throw new Error(
-      `迁移后构建验证失败：${build}\nstaging 保留在 ${toPosix(staging)}，目标目录为 ${toPosix(migratedTo)}。`
+      `迁移后构建验证失败：${build.detail ?? '未知原因'}\nstaging 保留在 ${toPosix(staging)}，目标目录为 ${toPosix(migratedTo)}。`
       + ' 请检查 link 路径改写或依赖；修复后可对目标目录重试 pnpm install && pnpm build，'
       + ' 重试 forge 时请带 update=true（目标目录已存在）。',
     )
@@ -630,30 +658,65 @@ export async function migrateAndCommit(options: MigrateOptions): Promise<Migrate
   if (committed && config.push) {
     await runCommand('git', ['push'], { cwd: migratedTo, timeoutMs: config.childTimeoutMs, signal })
   }
-  // 自迭代流程：install: true 且配置了 installProfile 时，装入 profile 立即可用。
-  // 默认关闭（不擅自修改用户 profile 配置）。
+  // 自迭代流程：默认自动装入当前 profile。agent 不能自发重启，
+  // 热挂载覆盖本会话、profile 装入覆盖重启后；install: false 可关闭，
+  // installProfile 显式指定时优先于自动探测。
   let installed = false
-  if (args.install === true && config.installProfile.trim() !== '') {
-    const install = await runCommand(
-      'dsh',
-      ['plugin', '--profile', config.installProfile.trim(), 'add', `link:${migratedPath}`],
-      { cwd: migratedTo, timeoutMs: config.childTimeoutMs, signal },
-    )
-    if (install.code !== 0) {
-      logger?.warn('forge_plugin: 装入 profile 失败 %s：%s', name, install.stderr.trim())
+  let installDetail: string | undefined
+  if (shouldInstall(args, config)) {
+    const profile = config.installProfile.trim() !== ''
+      ? config.installProfile.trim()
+      : await detectActiveProfile(path.join(dshHome(), 'profiles'))
+    if (profile === undefined) {
+      installDetail = '未探测到当前 profile（bundles 不含 @deepseek-ai/dsh-web-app）。可配置 installProfile 显式指定。'
+      logger?.warn('forge_plugin: 未探测到当前 profile，跳过装入 %s', name)
     } else {
-      installed = true
-      logger?.info('forge_plugin: 已装入 profile %s：%s', config.installProfile.trim(), migratedPath)
+      const install = await runCommand(
+        'dsh',
+        ['plugin', '--profile', profile, 'add', `link:${migratedPath}`],
+        { cwd: migratedTo, timeoutMs: config.childTimeoutMs, signal },
+      )
+      if (install.code !== 0) {
+        installDetail = truncateTail(install.stderr.trim(), TEXT_TAIL)
+        logger?.warn('forge_plugin: 装入 profile 失败 %s：%s', name, install.stderr.trim())
+      } else {
+        installed = true
+        logger?.info('forge_plugin: 已装入 profile %s：%s', profile, migratedPath)
+      }
     }
   }
-  return { migratedTo, committed, commitSubject, build, installed }
+  return { migratedTo, committed, commitSubject, build, installed, installDetail }
+}
+
+/** install 参数三态 → 是否尝试装入 profile：缺省跟随配置 autoInstall。 */
+export function shouldInstall(args: ForgeArgs, config: ForgeConfig): boolean {
+  return args.install === true || (args.install === undefined && config.autoInstall)
 }
 
 /** 注册 forge_plugin 工具；返回撤销函数。 */
+/** 工具输出 JSON-schema 的 properties（M03：单一维护源；satisfies 约束与 ForgeToolResult 字段对齐）。 */
+const RESULT_SCHEMA_PROPERTIES = {
+  ok: { type: 'boolean', required: true },
+  pluginName: { type: 'string', required: true },
+  migratedTo: { type: 'string' },
+  committed: { type: 'boolean', required: true },
+  commitSubject: { type: 'string' },
+  build: { type: 'string', required: true },
+  files: { type: 'array', items: { type: 'string' }, required: true },
+  childReport: { type: 'string' },
+  error: { type: 'string' },
+  installed: { type: 'boolean' },
+  installDetail: { type: 'string' },
+  hotMounted: { type: 'boolean' },
+  hotDetail: { type: 'string' },
+  duplicated: { type: 'boolean' },
+  existingName: { type: 'string' },
+} as const satisfies Record<Exclude<keyof ForgeToolResult, 'ok' | 'pluginName' | 'committed' | 'build' | 'files'> | 'ok' | 'pluginName' | 'committed' | 'build' | 'files', unknown>
+
 export function registerForgeTool(ctx: Context, config: ForgeConfig): () => void {
   return ctx.tools.register(defineTool({
     name: TOOL_NAME,
-    description: '按需生成 DSH 插件：子代理开发构建，迁移为「项目根/dsh-plugins/<name>」独立 git 仓库，功能完成即提交（英文 Conventional Commit），自动热挂载，登记（/forge status 可查）。子代理自动检测重复，已存在则返回 existingName，改用 update=true 迭代。install:true 装入 profile。耗时数分钟、需网络。',
+    description: '按需生成 DSH 插件：子代理开发构建，迁移为「项目根/dsh-plugins/<name>」独立 git 仓库，功能完成即提交（英文 Conventional Commit），自动热挂载（本会话立即可用，agent 不能自发重启），缺省自动装入当前 profile（重启后生效；install:false 关闭），登记（/forge status 可查）。子代理自动检测重复，已存在则返回 existingName，改用 update=true 迭代。耗时数分钟、需网络。',
     parameters: {
       requirement: {
         type: 'string',
@@ -678,7 +741,7 @@ export function registerForgeTool(ctx: Context, config: ForgeConfig): () => void
       },
       install: {
         type: 'boolean',
-        description: '装入 profile（默认 false；需配置 installProfile）。',
+        description: '装入 profile（缺省自动装入当前 profile；false 关闭；installProfile 配置可显式指定）。',
       },
       hot: {
         type: 'boolean',
@@ -689,22 +752,7 @@ export function registerForgeTool(ctx: Context, config: ForgeConfig): () => void
       schema: {
         type: 'object',
         additionalProperties: false,
-        properties: {
-          ok: { type: 'boolean', required: true },
-          pluginName: { type: 'string', required: true },
-          migratedTo: { type: 'string' },
-          committed: { type: 'boolean', required: true },
-          commitSubject: { type: 'string' },
-          build: { type: 'string', required: true },
-          files: { type: 'array', items: { type: 'string' }, required: true },
-          childReport: { type: 'string' },
-          error: { type: 'string' },
-          installed: { type: 'boolean' },
-          hotMounted: { type: 'boolean' },
-          hotDetail: { type: 'string' },
-          duplicated: { type: 'boolean' },
-          existingName: { type: 'string' },
-        },
+        properties: RESULT_SCHEMA_PROPERTIES,
       },
       render: (_args, value) => [{ type: 'text', text: renderResult(value) }],
     },

@@ -112,14 +112,8 @@ deepseek-harness 检出位于 ${toPosix(harnessRoot)}。从交付目录到它的
 ## 最终报告（最后一条消息必须包含以下固定格式块，便于宿主解析）
 
 REPORT_START
-plugin_name: ${name}
 summary_zh: <一句话中文功能摘要>
 summary_en: <一句话英文摘要，只含可打印 ASCII、无换行，≤72 字符，用于 Conventional Commit，如 "add keyword search for session memos">
-requires_client: <true|false>
-build: <passed|failed>
-typecheck: <passed|failed|skipped>
-test: <passed|failed|skipped|none>
-files: <逗号分隔的相对路径清单>
 notes: <补充说明：已知限制、网络使用情况、安装方式建议等>
 duplicate_of: <可选：检测到与已有插件重复时填其名称，此时不开发>
 duplicate_note: <可选：重复检测说明（重叠点/差异）>
