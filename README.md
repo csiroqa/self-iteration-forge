@@ -137,7 +137,18 @@ node scripts/llm-e2e-host.mjs prompt demo-greet "D:\2-OGP\dsh-plugin\.forge-stag
 # 2) 把提示词交给一个真实 LLM 子代理执行（staging 目录内开发 + 构建验证）
 # 3) 子代理完成后执行宿主侧全流程（迁移/link+CI 改写/构建/git 提交/登记）
 node scripts/llm-e2e-host.mjs run demo-greet "D:\2-OGP\dsh-plugin\.forge-staging\demo-greet" "D:/2-OGP" "D:/2-OGP/deepseek-harness" "feat: demo-greet: ……"
+# 4) 更新既有仓库：prompt 加第 7 参数 update，run 加 --update
+node scripts/llm-e2e-host.mjs prompt demo-greet <stagingDir> "D:/2-OGP" "D:/2-OGP/deepseek-harness" "给 /greet 加 --time 参数……" update
+node scripts/llm-e2e-host.mjs run demo-greet <stagingDir> "D:/2-OGP" "D:/2-OGP/deepseek-harness" "feat: demo-greet: ……" --update
 ```
+
+### 已执行的真实用例（实测记录）
+
+| 用例 | 需求 | 产物 | 结果 |
+| --- | --- | --- | --- |
+| 新建（命令类） | `/greet` 中文问候 + 配置 | `D:/2-OGP/demo-greet` | ✅ 3 提交（feat/fix/feat），24 单测，已装入 profile |
+| 更新（命令类） | `/greet` 增加 `--time`/`--repeat` | 同上 | ✅ update 链路：预填充→增量→同步删除→提交累计 2 次 |
+| 新建（工具类） | `current_time` 工具（defineTool） | `D:/2-OGP/time-utils` | ✅ 1 提交，7 单测，lib 加载与工具逻辑冒烟通过 |
 
 ## 设计意图：agent 自迭代
 
