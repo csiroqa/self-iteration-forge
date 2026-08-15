@@ -42,14 +42,8 @@ function fakeChild(options: {
         stopReason: 'completed' as const,
         text: [
           'REPORT_START',
-          'plugin_name: demo-mini',
           'summary_zh: （重复，未开发）',
           'summary_en: duplicate detected, nothing built',
-          'requires_client: false',
-          'build: skipped',
-          'typecheck: skipped',
-          'test: skipped',
-          'files: ',
           'notes: 检测到重复，未创建任何文件',
           `duplicate_of: ${duplicateOf}`,
           'duplicate_note: 与既有插件功能高度重叠（同为核心功能），无新增价值',
@@ -150,14 +144,8 @@ function fakeChild(options: {
     }
     const text = [
       'REPORT_START',
-      'plugin_name: demo-mini',
       'summary_zh: 最小示例插件',
       'summary_en: add minimal demo plugin',
-      'requires_client: false',
-      'build: passed',
-      'typecheck: passed',
-      'test: none',
-      'files: package.json, src/index.ts, tsdown.config.ts, cordis.patch.yml, README.md',
       'REPORT_END',
     ].join('\n')
     return { stopReason: 'completed' as const, text }

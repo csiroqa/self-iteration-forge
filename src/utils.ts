@@ -97,8 +97,15 @@ export function runCommand(
       reject(new SpawnError(`${bin} 无法启动：${error instanceof Error ? error.message : String(error)}`))
       return
     }
-    let stdout = ''
-    let stderr = ''
+    // 用 Buffer[] 累积而非逐 chunk 转串拼字符串（B-R2-1 / P-R2-4）：
+    // - `+= 字符串` 会对不可变字符串整体复制，大输出退化为 O(bytes²) 拷贝；
+    // - 逐 chunk `toString('utf8')` 会在多字节字符落在 chunk 边界时分裂成 \ufffd，
+    //   污染 git log/status、install 报错等非 ASCII 展示文本。
+    // 因此在命令结束时对全部 chunk 一次性 Buffer.concat + toString('utf8')。
+    const stdoutChunks: Buffer[] = []
+    const stderrChunks: Buffer[] = []
+    let stdoutBytes = 0
+    let stderrBytes = 0
     let settled = false
     const finish = (fn: () => void): void => {
       if (settled) return
@@ -139,8 +146,9 @@ export function runCommand(
     }
 
     child.stdout?.on('data', (chunk: Buffer) => {
-      stdout += chunk.toString('utf8')
-      if (stdout.length > CMD_MAX_BUFFER) {
+      stdoutChunks.push(chunk)
+      stdoutBytes += chunk.length
+      if (stdoutBytes > CMD_MAX_BUFFER) {
         finish(() => {
           killTree()
           reject(new SpawnError(`${bin} 输出超过 ${CMD_MAX_BUFFER / 1024 / 1024}MB 缓冲上限，命令被终止`))
@@ -148,8 +156,9 @@ export function runCommand(
       }
     })
     child.stderr?.on('data', (chunk: Buffer) => {
-      stderr += chunk.toString('utf8')
-      if (stderr.length > CMD_MAX_BUFFER) {
+      stderrChunks.push(chunk)
+      stderrBytes += chunk.length
+      if (stderrBytes > CMD_MAX_BUFFER) {
         finish(() => {
           killTree()
           reject(new SpawnError(`${bin} 输出超过 ${CMD_MAX_BUFFER / 1024 / 1024}MB 缓冲上限，命令被终止`))
@@ -162,7 +171,11 @@ export function runCommand(
     })
     child.on('close', (code) => {
       // 超时/取消/缓冲超限已在 finish 中处理；此处只处理正常结束。
-      finish(() => resolve({ code: typeof code === 'number' ? code : -1, stdout, stderr }))
+      finish(() => resolve({
+        code: typeof code === 'number' ? code : -1,
+        stdout: Buffer.concat(stdoutChunks).toString('utf8'),
+        stderr: Buffer.concat(stderrChunks).toString('utf8'),
+      }))
     })
   })
 }

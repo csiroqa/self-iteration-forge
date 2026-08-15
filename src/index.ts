@@ -92,7 +92,11 @@ export function apply(ctx: Context, config: Partial<Config> = {}): void {
   ctx.logger.info('plugin-forge 已加载：forge_plugin 工具与 /forge status 命令可用（targetRoot=%s）', merged.targetRoot)
 }
 
-// ---- 公共导出（仅保留 scripts/宿主有实际消费者的符号；内部工具从各模块直接 import） ----
+// ---- 公共导出 ----
+// 分层：scripts（smoke/llm-e2e-host）实际消费的迁移/git/registry/utils 符号直接列出；
+// runForge / mountPlugin / verifyPluginLoad 及其类型作为"程序化调用"契约有意保留
+// （供外部宿主/客户端不经工具/命令直接编程调用，D-R2-2）；内部管道符号
+// （selfIterationSectionText 等）仅作导入应用、不做冗余 re-export。
 export {
   ensureGitignore,
   copyInto,
@@ -128,8 +132,6 @@ export {
   runForge,
   assertNoRegistryHarnessDeps,
   verifyBuildInTarget,
-  selfIterationSectionText,
-  SELF_ITERATION_SECTION_ORDER,
   type ChildReport,
   type ForgeArgs,
   type ForgeLogger,

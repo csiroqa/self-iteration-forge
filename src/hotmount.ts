@@ -21,6 +21,23 @@ export function normalizeInject(inject: Plugin.Object['inject']): string[] | und
 }
 
 /**
+ * 组装需被挂载/校验的 cordis 插件描述符（{ name, inject?, Config?, apply }）。
+ * 热挂载与加载冒烟共用，避免两处重复展开对象字面量（M-R2-7）。
+ */
+export function pluginDescriptor(
+  mod: { name?: string; inject?: Plugin.Object['inject']; Config?: Plugin.Object['Config'] },
+  nameFallback: string,
+  apply: Plugin.Object['apply'],
+): Plugin.Object {
+  return {
+    name: mod.name ?? nameFallback,
+    ...(mod.inject !== undefined ? { inject: mod.inject } : {}),
+    ...(mod.Config !== undefined ? { Config: mod.Config } : {}),
+    apply,
+  }
+}
+
+/**
  * 动态加载已迁移插件的 lib/index.js（内容感知 cache-busting）。
  * 返回模块或失败原因（失败不抛出）。成功时 apply 已收窄为函数。
  *
@@ -86,12 +103,7 @@ export async function mountPlugin(ctx: Context, dir: string): Promise<HotMountRe
     // 挂载并等待 fiber 完成：apply 的同步/异步错误在此被捕获，
     // 注入依赖的子 fiber（如 ctx.inject 快捷方式）也在 await 期间收敛。
     try {
-      await ctx.plugin({
-        name: mod.name ?? path.basename(dir),
-        ...(mod.inject !== undefined ? { inject: mod.inject } : {}),
-        ...(mod.Config !== undefined ? { Config: mod.Config } : {}),
-        apply: mod.apply,
-      })
+      await ctx.plugin(pluginDescriptor(mod, path.basename(dir), mod.apply))
     } finally {
       if (toolsService !== undefined && originalRegister !== undefined) {
         toolsService.register = originalRegister

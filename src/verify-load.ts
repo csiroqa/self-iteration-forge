@@ -11,7 +11,7 @@
  */
 import { Context, type Fiber } from '@deepseek-ai/cordis'
 import path from 'node:path'
-import { loadPluginLib, normalizeInject } from './hotmount.ts'
+import { loadPluginLib, normalizeInject, pluginDescriptor } from './hotmount.ts'
 import { BUILTIN_TOOL_NAMES } from './builtin-names.ts'
 
 /** dsh-commands 的命令名校验（与 normalizeDefinition 一致）。 */
@@ -115,11 +115,8 @@ export async function verifyPluginLoad(dir: string): Promise<VerifyLoadResult> {
   try {
     // mod.apply 已在上方收窄为 function；此处按 cordis Plugin.Object 契约断言。
     const apply = mod.apply as (ctx: Context) => unknown
-    fiber = await ctx.plugin({
-      name: mod.name ?? path.basename(dir),
-      ...(mod.inject !== undefined ? { inject: mod.inject } : {}),
-      apply,
-    })
+    // M-R2-7：与热挂载共用 pluginDescriptor 组装描述符。
+    fiber = await ctx.plugin(pluginDescriptor(mod, path.basename(dir), apply))
     return { ok: true }
   } catch (error) {
     return {

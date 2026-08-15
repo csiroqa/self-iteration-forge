@@ -14,7 +14,7 @@ import { mkdir, readFile, readdir, rm, stat } from 'node:fs/promises'
 import path from 'node:path'
 import { commitStaged, ensureGitRepo, stageAll } from './git.ts'
 import { mountPlugin } from './hotmount.ts'
-import { copyChangedInto, copyInto, ensureGitignore, EXCLUDED_BASENAMES, pathExists, rewriteCiHarnessPaths, rewriteHarnessLinks, syncRemoveStale } from './migrate.ts'
+import { copyChangedInto, copyInto, ensureGitignore, EXCLUDED_BASENAMES, pathExists, PNPM_STORE, rewriteCiHarnessPaths, rewriteHarnessLinks, syncRemoveStale } from './migrate.ts'
 import { verifyPluginLoad } from './verify-load.ts'
 import { buildChildPrompt } from './prompt.ts'
 import { detectActiveProfile } from './profile.ts'
@@ -77,10 +77,16 @@ export interface ForgeConfig {
 export const SELF_ITERATION_SECTION_ORDER = 117
 
 /** 输出文本截断长度（工具返回值/日志中携带的子代理文本尾部）。 */
-export const TEXT_TAIL = 500
+const TEXT_TAIL = 500
 
 /** 子代理未正常完成时携带的部分输出长度。 */
-export const CHILD_TEXT_TAIL = 1500
+const CHILD_TEXT_TAIL = 1500
+
+/** registry 中 summaryZh 的上限字符数（服务于自迭代引导节"已有插件"清单，M-R2-9）。 */
+const SUMMARY_ZH_MAX = 60
+
+/** 构建验证的状态（用于工具结果 build 字段，M-R2-6 判别联合）。 */
+export type BuildStatus = 'passed' | 'skipped' | 'failed'
 
 /** 每天毫秒数（staging TTL 清理用）。 */
 const MS_PER_DAY = 86_400_000
@@ -142,7 +148,8 @@ export interface ForgeToolResult {
   readonly migratedTo?: string
   readonly committed: boolean
   readonly commitSubject?: string
-  readonly build: string
+  /** 构建验证状态（'passed' | 'skipped' | 'failed'）。 */
+  readonly build: BuildStatus
   readonly files: string[]
   readonly childReport?: string
   readonly error?: string
@@ -290,24 +297,36 @@ export async function verifyBuildInTarget(
   try {
     await runCommand('pnpm', ['install'], { cwd: target, timeoutMs: config.childTimeoutMs, signal })
     await runCommand('pnpm', ['build'], { cwd: target, timeoutMs: config.childTimeoutMs, signal })
-    // 构建"通过"不等于可安装：main/types 指向的文件必须真实存在
-    // （防子代理产出 index.mjs 却声明 main: lib/index.js 之类）。
+    // 构建"通过"不等于可安装：main/types 若已声明则必须真实存在且不逃逸包目录
+    // （防子代理产出 index.mjs 却声明 main: lib/index.js、或声明写成绝对路径 / ../ 逃逸）。
+    // 字段缺失视为"未声明"，不强制（合法插件可只声明 main 不声明 types——B-R2-3 收紧范围）。
     const packageJsonPath = path.join(target, 'package.json')
     if (await pathExists(packageJsonPath)) {
       const pkg = JSON.parse(await readFile(packageJsonPath, 'utf8')) as {
         main?: string
         types?: string
       }
-      const missing: string[] = []
+      const invalid: string[] = []
       for (const field of ['main', 'types'] as const) {
         const value = pkg[field]
-        if (value !== undefined && typeof value === 'string') {
-          const resolved = path.resolve(target, value)
-          if (!(await pathExists(resolved))) missing.push(`${field}=${value}`)
+        if (value === undefined) continue
+        if (typeof value !== 'string' || value.trim() === '') {
+          invalid.push(`${field}=${String(value)}（非字符串）`)
+          continue
+        }
+        const resolved = path.resolve(target, value)
+        if (!(await pathExists(resolved))) {
+          invalid.push(`${field}=${value}（文件不存在）`)
+          continue
+        }
+        // 逃逸检测：解析后的入口必须位于包目录内（拒绝 `../` 或指向别处的绝对路径）。
+        const rel = path.relative(target, resolved)
+        if (rel.startsWith('..') || path.isAbsolute(rel)) {
+          invalid.push(`${field}=${value}（逃逸包目录）`)
         }
       }
-      if (missing.length > 0) {
-        return { ok: false, detail: `package.json 声明的 ${missing.join('、')} 不存在（构建产物与声明不一致）` }
+      if (invalid.length > 0) {
+        return { ok: false, detail: `package.json 的入口声明异常：${invalid.join('、')}（构建产物与声明不一致）` }
       }
     }
     return { ok: true }
@@ -358,7 +377,7 @@ export async function cleanupStaleStaging(
   const cutoff = Date.now() - ttlDays * MS_PER_DAY
   let removed = 0
   for (const entry of entries) {
-    if (!entry.isDirectory() || entry.name === '.pnpm-store') continue
+    if (!entry.isDirectory() || entry.name === PNPM_STORE) continue
     if (activeNames.has(entry.name)) continue
     const full = path.join(stagingRoot, entry.name)
     try {
@@ -398,6 +417,21 @@ export interface RunForgeOptions {
   readonly logger?: ForgeLogger
 }
 
+/**
+ * 互斥释放兜底（B-R2-2）：若子代理在取消/超时时不能使 runForgeLocked 收敛，
+ * 该 promise 保证 signal 触发后必然 settle，从而 runForge 的 finally 一定执行，
+ * 同名插件名不会被永久标记为"进行中"。
+ */
+function abortSettle(signal: AbortSignal, message: string): Promise<never> {
+  return new Promise((_, reject) => {
+    if (signal.aborted) {
+      reject(new Error(message))
+      return
+    }
+    signal.addEventListener('abort', () => reject(new Error(message)), { once: true })
+  })
+}
+
 /** forge 全流程编排（可测试核心）；关键失败 throw；同名任务进程内互斥。 */
 export async function runForge(options: RunForgeOptions): Promise<ForgeToolResult> {
   const requirement = String(options.args.requirement ?? '')
@@ -408,7 +442,12 @@ export async function runForge(options: RunForgeOptions): Promise<ForgeToolResul
   }
   activeForge.add(name)
   try {
-    return await runForgeLocked(options, name)
+    const locked = runForgeLocked(options, name)
+    // 竞速：正常完成走 locked；signal 触发走 abortSettle，确保 finally 释放互斥。
+    // 落败的一方被 catch 吞掉，避免后台孤儿 promise 产生 unhandled rejection。
+    const raced = Promise.race([locked, abortSettle(options.signal, `forge 任务被取消（${name}）`)])
+    raced.catch(() => locked.catch(() => undefined))
+    return await raced
   } finally {
     activeForge.delete(name)
   }
@@ -504,7 +543,7 @@ async function runForgeLocked(options: RunForgeOptions, name: string): Promise<F
   let committed = false
   let commitSubject: string | undefined
   // 工具结果用字符串概括构建验证（'passed' / 'skipped' / 'failed'）；详见 MigrateOutcome.build。
-  let build = 'skipped'
+  let build: BuildStatus = 'skipped'
   let installed = false
   let installDetail: string | undefined
   if (migrate) {
@@ -518,7 +557,6 @@ async function runForgeLocked(options: RunForgeOptions, name: string): Promise<F
       args,
       signal,
       report,
-      childText: child.text,
       logger,
     })
     migratedTo = outcome.migratedTo
@@ -570,7 +608,6 @@ interface MigrateOptions {
   readonly args: ForgeArgs
   readonly signal: AbortSignal
   readonly report: ChildReport | undefined
-  readonly childText: string
   readonly logger?: ForgeLogger
 }
 
@@ -651,7 +688,7 @@ export async function migrateAndCommit(options: MigrateOptions): Promise<Migrate
     createdAt: previous?.createdAt ?? new Date().toISOString(),
     lastCommitAt: committed ? new Date().toISOString() : previous?.lastCommitAt,
     commitCount: (previous?.commitCount ?? 0) + (committed ? 1 : 0),
-    summaryZh: report?.summaryZh?.slice(0, 60) ?? previous?.summaryZh,
+    summaryZh: report?.summaryZh?.slice(0, SUMMARY_ZH_MAX) ?? previous?.summaryZh,
   }
   await upsertRepo(entry)
   // push 默认关闭（AGENTS.md：不自动 push）；仅在配置显式开启时执行。
