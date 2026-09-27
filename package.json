@@ -50,6 +50,7 @@
     "@deepseek-ai/dsh-subagent": "link:../deepseek-harness/packages/subagent/subagent",
     "@deepseek-ai/dsh-system-prompt": "link:../deepseek-harness/packages/core/system-prompt",
     "@deepseek-ai/dsh-tools": "link:../deepseek-harness/packages/core/tools",
+    "@deepseek-ai/dsh-util-values": "link:../deepseek-harness/packages/util/values",
     "@deepseek-ai/schemastery": "link:../deepseek-harness/vendor/schemastery"
   },
   "devDependencies": {

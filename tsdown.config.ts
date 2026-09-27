@@ -22,6 +22,8 @@ const HOST_RUNTIME_DEPS = [
   '@deepseek-ai/dsh-subagent',
   '@deepseek-ai/dsh-system-prompt',
   '@deepseek-ai/dsh-tools',
+  // 仅类型导入（JsonValue），但列入不内联清单以防将来改为值导入时被打进产物。
+  '@deepseek-ai/dsh-util-values',
   '@deepseek-ai/schemastery',
 ]
 
