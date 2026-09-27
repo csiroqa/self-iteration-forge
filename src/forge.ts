@@ -12,6 +12,14 @@ import type { JsonValue } from '@deepseek-ai/dsh-session'
 import type { SubagentResult, SubagentRun } from '@deepseek-ai/dsh-subagent'
 import { mkdir, readFile, readdir, rm, stat } from 'node:fs/promises'
 import path from 'node:path'
+import {
+  callStatRows,
+  callStatsPath,
+  clearCallStats,
+  formatPluginCallSummary,
+  loadCallStats,
+  recordToolCall,
+} from './call-stats.ts'
 import { commitStaged, ensureGitRepo, stageAll } from './git.ts'
 import { mountPlugin } from './hotmount.ts'
 import { copyChangedInto, copyInto, ensureGitignore, EXCLUDED_BASENAMES, pathExists, PNPM_STORE, rewriteCiHarnessPaths, rewriteHarnessLinks, syncRemoveStale } from './migrate.ts'
@@ -101,6 +109,9 @@ export function selfIterationSectionText(): string {
 }
 
 const TOOL_NAME = 'forge_plugin'
+
+/** plugin-forge 自身在调用账本里的插件名（与仓库目录名一致）。 */
+const FORGE_PLUGIN_NAME = 'plugin-forge'
 
 /** 进程内同名任务互斥：同一插件名同时只允许一个 forge 流程（防 staging/目标冲突）。 */
 const activeForge = new Set<string>()
@@ -753,7 +764,7 @@ const RESULT_SCHEMA_PROPERTIES = {
 export function registerForgeTool(ctx: Context, config: ForgeConfig): () => void {
   return ctx.tools.register(defineTool({
     name: TOOL_NAME,
-    description: '按需生成 DSH 插件：子代理开发构建，迁移为「项目根/dsh-plugins/<name>」独立 git 仓库，功能完成即提交（英文 Conventional Commit），自动热挂载（本会话立即可用，agent 不能自发重启），缺省自动装入当前 profile（重启后生效；install:false 关闭），登记（/forge status 可查）。子代理自动检测重复，已存在则返回 existingName，改用 update=true 迭代。耗时数分钟、需网络。',
+    description: '按需生成 DSH 插件：子代理开发构建，迁移为「项目根/dsh-plugins/<name>」独立 git 仓库，功能完成即提交（英文 Conventional Commit），自动热挂载（本会话立即可用，agent 不能自发重启），缺省自动装入当前 profile（重启后生效；install:false 关闭），登记（/forge status 可查）。每个插件的工具调用次数汇入统一账本（/forge stats 可查）。子代理自动检测重复，已存在则返回 existingName，改用 update=true 迭代。耗时数分钟、需网络。',
     parameters: {
       requirement: {
         type: 'string',
@@ -797,7 +808,12 @@ export function registerForgeTool(ctx: Context, config: ForgeConfig): () => void
     isConcurrencySafe: () => false,
     timeoutMs: config.childTimeoutMs,
     async execute(args, exec) {
-      const parent = exec.agent
+      // 自身也记账：/forge stats 能看到 forge_plugin 被调用了多少次。
+      // 记账是旁路：finally 里吞掉异常，绝不影响 forge 流程。
+      let callOk = false
+      let callDetail: string | undefined
+      try {
+        const parent = exec.agent
       if (parent === undefined) {
         throw new Error(`${TOOL_NAME} 需要调用方 agent（exec.agent 缺失）`)
       }
@@ -840,49 +856,110 @@ export function registerForgeTool(ctx: Context, config: ForgeConfig): () => void
         const mount = await mountPlugin(ctx, result.migratedTo)
         if (mount.ok) {
           ctx.logger.info('forge_plugin: 已热挂载 %s 到当前运行时', result.migratedTo)
+          callOk = true
           return withoutUndefined({ ...result, hotMounted: true })
         }
         ctx.logger.warn('forge_plugin: 热挂载失败 %s：%s', result.migratedTo, mount.detail ?? '')
+        callDetail = mount.detail
         return withoutUndefined({ ...result, hotMounted: false, hotDetail: mount.detail })
       }
+      callOk = result.ok
       return result
+      } catch (error) {
+        callDetail = error instanceof Error ? error.message : String(error)
+        throw error
+      } finally {
+        recordToolCall(FORGE_PLUGIN_NAME, TOOL_NAME, callOk ? 'ok' : 'failed', callDetail)
+      }
     },
   }))
 }
 
-/** 注册 /forge status 命令；返回撤销函数。 */
+/** /forge 的子命令：status（默认）/ stats [插件名] / stats reset [插件名]。 */
+export type ForgeSubcommand =
+  | { readonly kind: 'status' }
+  | { readonly kind: 'stats'; readonly plugin?: string; readonly reset: boolean }
+
+/** 解析 /forge 后的输入；空输入与无法识别的输入都按 status 处理（保持旧的裸 /forge 行为）。 */
+export function parseForgeSubcommand(rawInput: string): ForgeSubcommand {
+  const tokens = rawInput.trim().split(/\s+/u).filter((token) => token !== '')
+  if (tokens.length === 0 || tokens[0] === 'status') return { kind: 'status' }
+  if (tokens[0] !== 'stats') return { kind: 'status' }
+  if (tokens[1] === 'reset') {
+    return tokens[2] === undefined
+      ? { kind: 'stats', reset: true }
+      : { kind: 'stats', plugin: tokens[2], reset: true }
+  }
+  return tokens[1] === undefined
+    ? { kind: 'stats', reset: false }
+    : { kind: 'stats', plugin: tokens[1], reset: false }
+}
+
+/** /forge status：仓库清单 + 每个插件的工具调用摘要。 */
+async function forgeStatusText(): Promise<string> {
+  const registry = await loadRegistry()
+  if (registry.repos.length === 0) {
+    return 'plugin-forge 尚未创建任何插件仓库。'
+  }
+  const stats = await loadCallStats()
+  const lines: string[] = []
+  for (const repo of registry.repos) {
+    const exists = await pathExists(repo.path)
+    const when = repo.lastCommitAt === undefined
+      ? '（尚无提交）'
+      : new Date(repo.lastCommitAt).toLocaleString('zh-CN')
+    let head = '无 HEAD'
+    let cleanliness = '—'
+    if (exists) {
+      const log = await runCommand('git', ['log', '-1', '--format=%h %s'], { cwd: repo.path })
+      if (log.code === 0 && log.stdout.trim() !== '') head = log.stdout.trim()
+      const status = await runCommand('git', ['status', '--porcelain'], { cwd: repo.path })
+      cleanliness = status.code === 0 && status.stdout.trim() === '' ? '干净' : '有未提交改动'
+    }
+    lines.push(
+      `- ${repo.name}（${repo.path}）\n  HEAD：${head}；工作区：${exists ? cleanliness : '目录不存在'}；`
+      + `最近提交：${when}，累计 ${repo.commitCount} 次；`
+      + formatPluginCallSummary(stats, repo.name),
+    )
+  }
+  return `plugin-forge 已创建的插件仓库（${registry.repos.length} 个）：\n${lines.join('\n')}`
+}
+
+/** /forge stats [插件名]：按插件/工具列调用次数；stats reset 清零账本。 */
+async function forgeStatsText(sub: Extract<ForgeSubcommand, { kind: 'stats' }>): Promise<string> {
+  if (sub.reset) {
+    const removed = await clearCallStats(sub.plugin)
+    return sub.plugin === undefined
+      ? '已清空全部插件的调用次数记录。'
+      : `已清空 ${sub.plugin} 的调用次数记录（${removed} 个工具）。`
+  }
+  const stats = await loadCallStats()
+  const rows = callStatRows(stats, sub.plugin)
+  if (rows.length === 0) {
+    return sub.plugin === undefined
+      ? `尚无任何插件的工具调用记录（账本：${callStatsPath()}）。`
+      : `${sub.plugin} 尚无工具调用记录（账本：${callStatsPath()}）。`
+  }
+  const header = '| 插件 | 工具 | 调用 | 成功 | 失败 | 最近调用 |\n| --- | --- | ---: | ---: | ---: | --- |'
+  return [
+    `工具调用次数（${sub.plugin ?? '全部插件'}）：`,
+    header,
+    ...rows,
+    '',
+    `账本：${callStatsPath()}`,
+  ].join('\n')
+}
+
+/** 注册 /forge 命令（status / stats 子命令）；返回撤销函数。 */
 export function registerForgeCommand(ctx: Context): () => void {
   return ctx.commands.register({
     name: 'forge',
-    description: '查看 plugin-forge 已创建的插件仓库（路径 / HEAD / 工作区状态 / 最近提交）',
-    handler: async () => {
-      const registry = await loadRegistry()
-      if (registry.repos.length === 0) {
-        return { kind: 'success' as const, text: 'plugin-forge 尚未创建任何插件仓库。' }
-      }
-      const lines: string[] = []
-      for (const repo of registry.repos) {
-        const exists = await pathExists(repo.path)
-        const when = repo.lastCommitAt === undefined
-          ? '（尚无提交）'
-          : new Date(repo.lastCommitAt).toLocaleString('zh-CN')
-        let head = '无 HEAD'
-        let cleanliness = '—'
-        if (exists) {
-          const log = await runCommand('git', ['log', '-1', '--format=%h %s'], { cwd: repo.path })
-          if (log.code === 0 && log.stdout.trim() !== '') head = log.stdout.trim()
-          const status = await runCommand('git', ['status', '--porcelain'], { cwd: repo.path })
-          cleanliness = status.code === 0 && status.stdout.trim() === '' ? '干净' : '有未提交改动'
-        }
-        lines.push(
-          `- ${repo.name}（${repo.path}）\n  HEAD：${head}；工作区：${exists ? cleanliness : '目录不存在'}；`
-          + `最近提交：${when}，累计 ${repo.commitCount} 次`,
-        )
-      }
-      return {
-        kind: 'success' as const,
-        text: `plugin-forge 已创建的插件仓库（${registry.repos.length} 个）：\n${lines.join('\n')}`,
-      }
+    description: '查看 plugin-forge 已创建的插件仓库（路径 / HEAD / 工作区状态 / 最近提交 / 工具调用次数）；/forge stats 看调用明细',
+    input: { hint: 'status | stats [插件名] | stats reset [插件名]' },
+    handler: async (invocation) => {
+      const sub = parseForgeSubcommand(invocation.rawInput)
+      const text = sub.kind === 'stats' ? await forgeStatsText(sub) : await forgeStatusText()
+      return { kind: 'success' as const, text }
     },
   })
 }

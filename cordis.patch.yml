@@ -1,4 +1,4 @@
-# @dsh-external/plugin-forge bundle patch（host 半区：forge_plugin 工具 + /forge status）。
+# @dsh-external/plugin-forge bundle patch（host 半区：forge_plugin 工具 + /forge status|stats + 工具调用次数账本）。
 # 安装：dsh plugin --profile web add link:<this-directory>
 #
 # config 全部可选（默认值见 src/index.ts 的 DEFAULTS）：

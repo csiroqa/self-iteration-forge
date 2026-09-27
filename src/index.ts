@@ -139,5 +139,23 @@ export {
   type StartChild,
 } from './forge.ts'
 export { mountPlugin, type HotMountResult } from './hotmount.ts'
+export {
+  CALL_STATS_FILE_NAME,
+  CALL_STATS_VERSION,
+  callStatRows,
+  callStatsPath,
+  clearCallStats,
+  emptyCallStats,
+  flushCallStats,
+  formatPluginCallSummary,
+  loadCallStats,
+  pluginCallTotals,
+  recordToolCall,
+  type CallStats,
+  type PluginCallStat,
+  type PluginCallTotals,
+  type ToolCallStat,
+} from './call-stats.ts'
+export { PLUGIN_CALL_STATS_SOURCE } from './plugin-call-stats.template.ts'
 export { verifyPluginLoad, type VerifyLoadResult } from './verify-load.ts'
 export { buildChildPrompt, type ChildPromptContext } from './prompt.ts'

@@ -1,6 +1,7 @@
 /** 子代理提示词构建：需求 + 姐妹仓库规范 + AGENTS.md + 环境约束 + REPORT 格式。 */
 import { toPosix } from './utils.ts'
 import { BUILTIN_TOOL_NAMES } from './builtin-names.ts'
+import { PLUGIN_CALL_STATS_SOURCE } from './plugin-call-stats.template.ts'
 
 /** 构建子代理提示词所需的上下文。 */
 export interface ChildPromptContext {
@@ -70,10 +71,26 @@ ${modeSection}## 必须遵循的规范（用户全局 AGENTS.md + 姐妹插件�
 - tsconfig.json：参照姐妹仓库（target ES2022、moduleResolution bundler、strict、types:["node"]、allowImportingTsExtensions 等）。
 - tsdown.config.ts：host 半区产出 lib/index.js（ESM、dts、neverBundle 全部 @deepseek-ai/* link 依赖、fixedExtension: false——确保产出 index.js 而非 index.mjs，与 package.json 的 main/types 一致）；如有浏览器半区，按姐妹仓库的闭包工厂配置（window.__ModuleLoader__.load）再产出 lib/client.js，平台 externals 与 dsh-schedule/dsh-hotkeys 一致。
 - cordis.patch.yml：- insert: - id: ${name} / name: '@dsh-external/${name}' / config: {...}，并用中文注释说明每个配置项。
-- src/index.ts：export const name = '${name}'；export const inject = [所需服务]；export function apply(ctx, config)；如有配置用 @deepseek-ai/schemastery 的 z 定义 Config（z<Config> 模式见 @deepseek-ai/dsh-tool-subagent）。
+- src/index.ts：export const name = '${name}'；export const inject = [所需服务]；export function apply(ctx, config)；如有配置用 @deepseek-ai/schemastery 的 z 定义 Config（z<Config> 模式见 @deepseek-ai/dsh-tool-subagent）。**每个工具的 execute 都必须用 withCallStats 包裹（见下「工具调用次数记录」）**。
 - 浏览器半区（仅当需求需要 UI）：src/client/index.ts + package.json 的 dsh.client（platform: web，inject @deepseek-ai/dsh-client-runtime）。
 - README.md（中文）+ README.en.md（英文，互链一行）+ LICENSE（MIT，Copyright (c) 2026 csiroqa）+ .editorconfig + .gitattributes + .gitignore（node_modules/、lib/、dist/、*.tsbuildinfo、*.log、.DS_Store、Thumbs.db）+ .github/workflows/ci.yml（3 OS 矩阵：clone 兄弟 deepseek-harness → pnpm install → typecheck → test → build → smoke）。
 - 代码注释用中文；UX 文案按 AGENTS.md：用户引导文本不暴露实现细节，错误提示给建议 + 适量调试信息。
+
+### 工具调用次数记录（强制，所有插件一致）
+
+本插件的每个工具都要把调用次数汇入 plugin-forge 的统一账本，供 /forge status 与 /forge stats 展示。做法固定，不要自行设计：
+
+1. 新建 src/call-stats.ts，内容**逐字复制**下面这段标准模块。各插件是彼此独立的 git 仓库，不引入交叉依赖，因此内联同一份源码；plugin-forge 侧有测试校验两侧结构不漂移。
+2. 在 src/index.ts 里 import { withCallStats } from './call-stats.ts'，并把**每个** defineTool 的 execute 包裹一层：
+   execute: withCallStats('${name}', '该工具的注册名', async (args, exec) => { ...原实现... }),
+   插件名固定写 '${name}'；工具名逐个工具各写各的，复制粘贴后务必核对，不要多个工具写成同一个名字。
+3. 该模块只记「插件名 / 工具名 / 成败 / 时间」，不记调用参数与返回值；写盘失败一律吞掉，绝不影响工具执行——不要在它外面再包 try/catch，也不要加日志噪音。
+
+AGENTS.md 禁止的是「遥测、追踪、第三方上报」；本条是纯本机旁路计数，不联网、不外发，属于本次交付的明确要求，不要以「禁止遥测」为由省略。
+
+\`\`\`ts
+${PLUGIN_CALL_STATS_SOURCE}
+\`\`\`
 
 ### 参考仓库（先通读再动手）
 
@@ -105,10 +122,10 @@ deepseek-harness 检出位于 ${toPosix(harnessRoot)}。从交付目录到它的
 1. 用 read/glob/grep 通读参考仓库与所需 API 源码，确认工具链与格式细节。
 2. 设计插件：功能、注入的服务、配置项、是否需要浏览器半区、注册哪些工具/命令。
    - **工具名冲突检查**：defineTool 的工具名不得与宿主内置工具重名（跨 scope 注册不报错但模型侧遮蔽）。宿主内置工具清单：${[...BUILTIN_TOOL_NAMES].sort().join('、')}。命令名同理避免与宿主已有命令重复。
-3. 在交付目录创建全部文件（文件清单见「仓库格式」）。
+3. 在交付目录创建全部文件（文件清单见「仓库格式」），其中必须包含 src/call-stats.ts，且每个工具的 execute 都已用 withCallStats 包裹。
 4. 安装依赖：pnpm install（必要时加 --store-dir / --ignore-scripts）。
 5. 构建验证：pnpm typecheck、pnpm test（如写了测试）、pnpm build，修复到全部通过；脚本不存在的检查如实标注 skipped。
-6. 自查：文件齐备、命名规范、无敏感信息、.gitignore 覆盖 node_modules 等。
+6. 自查：文件齐备、命名规范、无敏感信息、.gitignore 覆盖 node_modules 等；grep 一遍 withCallStats，确认工具数与包裹数一致（更新模式下新增的工具同样要包裹）。
 7. 汇报。
 
 ## 最终报告（最后一条消息必须包含以下固定格式块，便于宿主解析）

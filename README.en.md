@@ -31,16 +31,25 @@ Output JSON:
 
 Failure (subagent not completed / post-migration build failed / load smoke failed) throws; staging is kept.
 
-## Command `/forge status`
+## Commands `/forge status` and `/forge stats`
 
-Per repo:
+`/forge status` (same as bare `/forge`) prints per repo; the trailing segment is that plugin's tool call summary:
 
 ```
 - <name>（<path>）
-  HEAD：<short-hash> <subject>；worktree：clean|dirty|missing；last commit：<local time>，count <n>
+  HEAD：<short-hash> <subject>；worktree：clean|dirty|missing；last commit：<local time>，count <n>；calls <c>（ok <ok> / failed <failed>，<t> tools），last <local time>
 ```
 
-Empty registry prints "plugin-forge 尚未创建任何插件仓库。"
+With no records the segment reads "尚无调用记录"; an empty registry prints "plugin-forge 尚未创建任何插件仓库。"
+
+`/forge stats [plugin]` prints the per-tool table (plugin / tool / calls / ok / failed / last call, sorted by call count); `/forge stats reset [plugin]` clears the ledger (all of it when the plugin name is omitted).
+
+## Tool call ledger
+
+- File: `$DSH_HOME/storages/plugin-call-stats.json` (default `~/.dsh/storages/`), shape `{version: 1, plugins: {<plugin>: {tools: {<tool>: {calls, ok, failed, lastCalledAt, lastOkAt?, lastFailedAt?, lastError?}}, firstSeenAt, updatedAt}}}`
+- **New plugins get it automatically**: the subagent prompt mandates a `src/call-stats.ts` inlining the standard module shipped by `plugin-call-stats.template.ts`, and every tool `execute` is wrapped with `withCallStats('<plugin>', '<tool>', execute)`. Plugin repos are independent, so the module is inlined rather than shared; `src/call-stats.spec.ts` guards the two sides against drift
+- plugin-forge's own `forge_plugin` records through the same interface (plugin name `plugin-forge`)
+- Side-channel guarantees: only plugin/tool names, outcome and timestamps are stored (never arguments or results), deltas are merged and written atomically (tmp → rename), and every failure is swallowed so a tool never breaks on accounting
 
 ## Pipeline
 

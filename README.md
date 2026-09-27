@@ -33,16 +33,25 @@ English: [README.en.md](README.en.md)
 
 失败（子代理未完成 / 迁移后构建失败 / 加载冒烟未通过）throw，staging 保留。
 
-## 命令 `/forge status`
+## 命令 `/forge status` 与 `/forge stats`
 
-逐仓库输出：
+`/forge status`（等价于裸 `/forge`）逐仓库输出，末段是该插件的工具调用摘要：
 
 ```
 - <name>（<path>）
-  HEAD：<短哈希> <subject>；工作区：干净|有未提交改动|目录不存在；最近提交：<本地时间>，累计 <n> 次
+  HEAD：<短哈希> <subject>；工作区：干净|有未提交改动|目录不存在；最近提交：<本地时间>，累计 <n> 次；调用 <c> 次（成功 <ok> / 失败 <failed>，共 <t> 个工具），最近 <本地时间>
 ```
 
-registry 为空时输出「plugin-forge 尚未创建任何插件仓库。」
+无记录时该段显示「尚无调用记录」；registry 为空时输出「plugin-forge 尚未创建任何插件仓库。」
+
+`/forge stats [插件名]` 输出调用明细表（插件 / 工具 / 调用 / 成功 / 失败 / 最近调用，按调用次数降序），`/forge stats reset [插件名]` 清空账本（不带插件名则清空全部）。
+
+## 工具调用次数账本
+
+- 账本文件：`$DSH_HOME/storages/plugin-call-stats.json`（缺省 `~/.dsh/storages/`），形状 `{version: 1, plugins: {<插件名>: {tools: {<工具名>: {calls, ok, failed, lastCalledAt, lastOkAt?, lastFailedAt?, lastError?}}, firstSeenAt, updatedAt}}}`
+- **新插件自动带统计**：子代理提示词强制要求新建 `src/call-stats.ts` 并内联 `plugin-call-stats.template.ts` 下发的标准模块，每个工具的 execute 用 `withCallStats('<插件名>', '<工具名>', execute)` 包裹；各插件是独立仓库，故内联同一份源码而非交叉依赖，`src/call-stats.spec.ts` 校验两侧不漂移
+- plugin-forge 自身的 `forge_plugin` 也走同一套接口记账（插件名 `plugin-forge`）
+- 旁路保证：只记插件名 / 工具名 / 成败与时间（不记参数与返回值），增量合并 + 原子写（tmp → rename），任何失败都被吞掉，绝不影响工具执行
 
 ## 流程
 
