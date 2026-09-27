@@ -29,6 +29,9 @@ importers:
       '@deepseek-ai/dsh-tools':
         specifier: link:../deepseek-harness/packages/core/tools
         version: link:../deepseek-harness/packages/core/tools
+      '@deepseek-ai/dsh-util-values':
+        specifier: link:../deepseek-harness/packages/util/values
+        version: link:../deepseek-harness/packages/util/values
       '@deepseek-ai/schemastery':
         specifier: link:../deepseek-harness/vendor/schemastery
         version: link:../deepseek-harness/vendor/schemastery
