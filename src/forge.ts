@@ -814,57 +814,57 @@ export function registerForgeTool(ctx: Context, config: ForgeConfig): () => void
       let callDetail: string | undefined
       try {
         const parent = exec.agent
-      if (parent === undefined) {
-        throw new Error(`${TOOL_NAME} 需要调用方 agent（exec.agent 缺失）`)
-      }
-      // 工作区 = 父会话 cwd；staging 放在工作区内（子代理沙箱可写）。
-      const sessionCwd = parent.session.header.cwd
-      const workspace = sessionCwd !== undefined && sessionCwd.trim() !== ''
-        ? path.resolve(sessionCwd)
-        : process.cwd()
-      const harnessRoot = config.harnessRoot.trim() !== ''
-        ? path.resolve(config.harnessRoot)
-        : await findHarnessRoot(workspace)
-
-      const startChild: StartChild = async (request) => {
-        const provider = ctx.subagents.getProvider(config.subagentProvider)
-        if (provider === undefined) {
-          throw new Error(`subagent provider "${config.subagentProvider}" 未注册（base bundle 应内置 spawn）`)
+        if (parent === undefined) {
+          throw new Error(`${TOOL_NAME} 需要调用方 agent（exec.agent 缺失）`)
         }
-        const run: SubagentRun = await ctx.subagents.start(config.subagentProvider, {
-          label: request.label,
-          prompt: [{ type: 'text', text: request.promptText }],
-          parent,
-          signal: request.signal,
-          maxDepth: request.maxDepth,
+        // 工作区 = 父会话 cwd；staging 放在工作区内（子代理沙箱可写）。
+        const sessionCwd = parent.session.header.cwd
+        const workspace = sessionCwd !== undefined && sessionCwd.trim() !== ''
+          ? path.resolve(sessionCwd)
+          : process.cwd()
+        const harnessRoot = config.harnessRoot.trim() !== ''
+          ? path.resolve(config.harnessRoot)
+          : await findHarnessRoot(workspace)
+
+        const startChild: StartChild = async (request) => {
+          const provider = ctx.subagents.getProvider(config.subagentProvider)
+          if (provider === undefined) {
+            throw new Error(`subagent provider "${config.subagentProvider}" 未注册（base bundle 应内置 spawn）`)
+          }
+          const run: SubagentRun = await ctx.subagents.start(config.subagentProvider, {
+            label: request.label,
+            prompt: [{ type: 'text', text: request.promptText }],
+            parent,
+            signal: request.signal,
+            maxDepth: request.maxDepth,
+          })
+          return collectChild(run)
+        }
+
+        const result = await runForge({
+          config,
+          workspace,
+          harnessRoot,
+          args,
+          signal: exec.signal,
+          startChild,
+          logger: ctx.logger,
         })
-        return collectChild(run)
-      }
-
-      const result = await runForge({
-        config,
-        workspace,
-        harnessRoot,
-        args,
-        signal: exec.signal,
-        startChild,
-        logger: ctx.logger,
-      })
-      // 热挂载（默认开启）：生成成功后挂载到当前运行时（无需重启）。
-      // 热挂载失败不阻塞交付（已提交的仓库始终可用），仅返回 hotDetail 提示。
-      if (args.hot !== false && result.ok && result.migratedTo !== undefined) {
-        const mount = await mountPlugin(ctx, result.migratedTo)
-        if (mount.ok) {
-          ctx.logger.info('forge_plugin: 已热挂载 %s 到当前运行时', result.migratedTo)
-          callOk = true
-          return withoutUndefined({ ...result, hotMounted: true })
+        // 热挂载（默认开启）：生成成功后挂载到当前运行时（无需重启）。
+        // 热挂载失败不阻塞交付（已提交的仓库始终可用），仅返回 hotDetail 提示。
+        if (args.hot !== false && result.ok && result.migratedTo !== undefined) {
+          const mount = await mountPlugin(ctx, result.migratedTo)
+          if (mount.ok) {
+            ctx.logger.info('forge_plugin: 已热挂载 %s 到当前运行时', result.migratedTo)
+            callOk = true
+            return withoutUndefined({ ...result, hotMounted: true })
+          }
+          ctx.logger.warn('forge_plugin: 热挂载失败 %s：%s', result.migratedTo, mount.detail ?? '')
+          callDetail = mount.detail
+          return withoutUndefined({ ...result, hotMounted: false, hotDetail: mount.detail })
         }
-        ctx.logger.warn('forge_plugin: 热挂载失败 %s：%s', result.migratedTo, mount.detail ?? '')
-        callDetail = mount.detail
-        return withoutUndefined({ ...result, hotMounted: false, hotDetail: mount.detail })
-      }
-      callOk = result.ok
-      return result
+        callOk = result.ok
+        return result
       } catch (error) {
         callDetail = error instanceof Error ? error.message : String(error)
         throw error
