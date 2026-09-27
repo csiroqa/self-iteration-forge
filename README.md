@@ -52,6 +52,7 @@ English: [README.en.md](README.en.md)
 - **新插件自动带统计**：子代理提示词强制要求新建 `src/call-stats.ts` 并内联 `plugin-call-stats.template.ts` 下发的标准模块，每个工具的 execute 用 `withCallStats('<插件名>', '<工具名>', execute)` 包裹；各插件是独立仓库，故内联同一份源码而非交叉依赖，`src/call-stats.spec.ts` 校验两侧不漂移
 - plugin-forge 自身的 `forge_plugin` 也走同一套接口记账（插件名 `plugin-forge`）
 - 旁路保证：只记插件名 / 工具名 / 成败与时间（不记参数与返回值），增量合并 + 原子写（tmp → rename），任何失败都被吞掉，绝不影响工具执行
+- 命令型插件（无 defineTool、用户入口是 `/xxx` 命令）：在命令 handler 里显式 `recordCall('<插件名>', '<命令名>', ok ? 'ok' : 'failed', 原因)`；后台自动触发（会话钩子等）默认不记，否则次数会随会话数无条件增长
 
 ## 流程
 

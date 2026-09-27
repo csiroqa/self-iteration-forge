@@ -50,6 +50,7 @@ With no records the segment reads "尚无调用记录"; an empty registry prints
 - **New plugins get it automatically**: the subagent prompt mandates a `src/call-stats.ts` inlining the standard module shipped by `plugin-call-stats.template.ts`, and every tool `execute` is wrapped with `withCallStats('<plugin>', '<tool>', execute)`. Plugin repos are independent, so the module is inlined rather than shared; `src/call-stats.spec.ts` guards the two sides against drift
 - plugin-forge's own `forge_plugin` records through the same interface (plugin name `plugin-forge`)
 - Side-channel guarantees: only plugin/tool names, outcome and timestamps are stored (never arguments or results), deltas are merged and written atomically (tmp → rename), and every failure is swallowed so a tool never breaks on accounting
+- Command-driven plugins (no `defineTool`, the user entry point is a `/xxx` command): call `recordCall('<plugin>', '<command>', ok ? 'ok' : 'failed', reason)` in the command handler. Background triggers (session hooks and the like) are not counted by default — otherwise the count would grow with every session and stop meaning "how often it was used"
 
 ## Pipeline
 
