@@ -78,9 +78,9 @@ ${modeSection}## 必须遵循的规范（用户全局 AGENTS.md + 姐妹插件�
 
 ### 工具调用次数记录（强制，所有插件一致）
 
-本插件的每个工具都要把调用次数汇入 plugin-forge 的统一账本，供 /forge status 与 /forge stats 展示。做法固定，不要自行设计：
+本插件的每个工具都要把调用次数汇入 self-iteration-forge 的统一账本，供 /self-iteration status 与 /self-iteration stats 展示。做法固定，不要自行设计：
 
-1. 新建 src/call-stats.ts，内容**逐字复制**下面这段标准模块。各插件是彼此独立的 git 仓库，不引入交叉依赖，因此内联同一份源码；plugin-forge 侧有测试校验两侧结构不漂移。
+1. 新建 src/call-stats.ts，内容**逐字复制**下面这段标准模块。各插件是彼此独立的 git 仓库，不引入交叉依赖，因此内联同一份源码；self-iteration-forge 侧有测试校验两侧结构不漂移。
 2. 在 src/index.ts 里 import { withCallStats } from './call-stats.ts'，并把**每个** defineTool 的 execute 包裹一层：
    execute: withCallStats('${name}', '该工具的注册名', async (args, exec) => { ...原实现... }),
    插件名固定写 '${name}'；工具名逐个工具各写各的，复制粘贴后务必核对，不要多个工具写成同一个名字。
@@ -117,7 +117,7 @@ deepseek-harness 检出位于 ${toPosix(harnessRoot)}。从交付目录到它的
 ## 开发步骤
 
 0. **重复检查（第一步，创建任何文件之前）**：
-   - 读取登记表 $DSH_HOME/plugin-forge.json（若存在，含各插件的中文功能摘要），并列出迁移目标根目录 ${toPosix(targetRoot)} 下的子目录；
+   - 读取登记表 $DSH_HOME/self-iteration-forge.json（若存在，含各插件的中文功能摘要），并列出迁移目标根目录 ${toPosix(targetRoot)} 下的子目录；
    - 若已有插件的功能与当前需求**重复/高度重叠**：**不要开发任何文件**，在最终 REPORT 中填写 \`duplicate_of: <已有插件名>\` 与 \`duplicate_note: <一句话说明重叠点与差异>\`，然后直接结束（staging 保持为空）；
    - 若部分重叠但有明确新增价值：正常开发，并在 REPORT 的 \`notes\` 中说明与哪个插件重叠、差异是什么。
 1. 用 read/glob/grep 通读参考仓库与所需 API 源码，确认工具链与格式细节。

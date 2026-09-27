@@ -1,5 +1,5 @@
 /**
- * plugin-forge —— 加载冒烟测试。
+ * self-iteration-forge —— 加载冒烟测试。
  *
  * 用真实 cordis Context + 假 commands/tools 服务执行插件 apply，
  * 验证 apply 期错误（命令 input.hint 为空、description 为空、工具缺 output）
@@ -19,7 +19,7 @@ const REPO_ROOT = path.resolve(fileURLToPath(new URL('../', import.meta.url)))
 let tempRoot: string
 
 beforeEach(async () => {
-  tempRoot = await mkdtemp(path.join(tmpdir(), 'plugin-forge-verifyload-'))
+  tempRoot = await mkdtemp(path.join(tmpdir(), 'self-iteration-forge-verifyload-'))
 })
 
 afterEach(async () => {

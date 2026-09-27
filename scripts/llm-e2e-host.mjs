@@ -1,5 +1,5 @@
 /**
- * plugin-forge —— 真实 LLM 实例测试的宿主侧脚本。
+ * self-iteration-forge —— 真实 LLM 实例测试的宿主侧脚本。
  *
  * 两个模式：
  *   node scripts/llm-e2e-host.mjs prompt <name> <stagingDir> <targetRoot> <harnessRoot> <requirement> [create|update]
@@ -8,7 +8,7 @@
  *   node scripts/llm-e2e-host.mjs run <name> <stagingDir> <targetRoot> <harnessRoot> <commitSubject>
  *     子代理完成后执行宿主侧全流程：迁移 → link 改写 → 依赖守卫 →
  *     .gitignore → 目标目录 pnpm install+build（含 main/types 校验）→
- *     git init/add/diff/commit → 登记进 $DSH_HOME/plugin-forge.json。
+ *     git init/add/diff/commit → 登记进 $DSH_HOME/self-iteration-forge.json。
  *
  * 这是 runForge 的"人工注入 startChild"等价路径：子代理由外部真实 LLM
  * 执行，宿主侧复用 lib 的同一批函数。
@@ -131,7 +131,7 @@ if (mode === 'run') {
     console.log('      无暂存改动，跳过提交')
   }
 
-  console.log('[5/6] 登记进 $DSH_HOME/plugin-forge.json')
+  console.log('[5/6] 登记进 $DSH_HOME/self-iteration-forge.json')
   const migratedPath = toPosix(target)
   const { loadRegistry } = await import('../lib/index.js')
   const previous = (await loadRegistry()).repos.find((repo) => repo.path.toLowerCase() === migratedPath.toLowerCase())

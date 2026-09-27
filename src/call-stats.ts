@@ -1,12 +1,12 @@
 /**
- * 插件工具调用次数账本（plugin-forge 原生组件，宿主侧）。
+ * 插件工具调用次数账本（self-iteration-forge 原生组件，宿主侧）。
  *
  * 账本文件：$DSH_HOME/storages/plugin-call-stats.json（缺省 ~/.dsh/storages/）。
  * 每个由 forge 创建/更新的插件在自己的 src/call-stats.ts 内联 plugin-call-stats.template.ts
  * 下发的标准模块，把自己的工具调用汇入同一个账本；本模块负责读取、汇总与渲染：
- *   - /forge status：每个仓库一行追加「调用 N 次（成功 x / 失败 y），最近 …」
- *   - /forge stats：按插件/工具出明细表（可按插件名过滤、可清零）
- *   - forge_plugin 自身也用同一套接口记账（插件名 plugin-forge）
+ *   - /self-iteration status：每个仓库一行追加「调用 N 次（成功 x / 失败 y），最近 …」
+ *   - /self-iteration stats：按插件/工具出明细表（可按插件名过滤、可清零）
+ *   - forge_capability 自身也用同一套接口记账（插件名 self-iteration-forge）
  *
  * 旁路原则：统计失败绝不影响 forge 流程——读账本失败按空账本处理，写失败只吞异常。
  */
@@ -54,7 +54,7 @@ export interface CallStats {
   plugins: Record<string, PluginCallStat>
 }
 
-/** 插件维度的汇总数字（供 /forge status 一行展示）。 */
+/** 插件维度的汇总数字（供 /self-iteration status 一行展示）。 */
 export interface PluginCallTotals {
   calls: number
   ok: number
@@ -233,7 +233,7 @@ function formatTime(iso: string | undefined): string {
   return Number.isNaN(at.getTime()) ? iso : at.toLocaleString('zh-CN')
 }
 
-/** /forge status 用的一行调用摘要；无记录时返回「尚无调用记录」。 */
+/** /self-iteration status 用的一行调用摘要；无记录时返回「尚无调用记录」。 */
 export function formatPluginCallSummary(stats: CallStats, plugin: string): string {
   const totals = pluginCallTotals(stats, plugin)
   if (totals === undefined) return '尚无调用记录'
@@ -241,7 +241,7 @@ export function formatPluginCallSummary(stats: CallStats, plugin: string): strin
     + `共 ${totals.tools} 个工具），最近 ${formatTime(totals.lastCalledAt)}`
 }
 
-/** /forge stats 的明细行（插件 -> 工具 -> 数字），按调用次数降序。 */
+/** /self-iteration stats 的明细行（插件 -> 工具 -> 数字），按调用次数降序。 */
 export function callStatRows(stats: CallStats, plugin?: string): string[] {
   const names = plugin === undefined
     ? Object.keys(stats.plugins).sort()
@@ -259,7 +259,7 @@ export function callStatRows(stats: CallStats, plugin?: string): string[] {
   return rows
 }
 
-/** 清空账本（/forge stats reset）；指定插件名时只清该插件，返回被清掉的工具条数。 */
+/** 清空账本（/self-iteration stats reset）；指定插件名时只清该插件，返回被清掉的工具条数。 */
 export async function clearCallStats(plugin?: string): Promise<number> {
   if (plugin === undefined) {
     pending.clear()

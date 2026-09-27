@@ -1,5 +1,5 @@
 /**
- * plugin-forge 下发的「插件工具调用次数」标准模块源码（模板）。
+ * self-iteration-forge 下发的「插件工具调用次数」标准模块源码（模板）。
  *
  * 每个由 forge 创建/更新的插件，都在自己的 src/call-stats.ts 内联**逐字一致**的
  * 本模块源码（各插件是彼此独立的 git 仓库，不引入交叉依赖），并用它包裹每个工具的
@@ -7,7 +7,7 @@
  *
  *     execute: withCallStats('插件名', '工具名', async (args, exec) => { ... }),
  *
- * 账本文件与结构由 src/call-stats.ts（宿主侧）共享，/forge status 与 /forge stats
+ * 账本文件与结构由 src/call-stats.ts（宿主侧）共享，/self-iteration status 与 /self-iteration stats
  * 直接读它做汇总；src/call-stats.spec.ts 校验两侧关键常量不漂移。
  *
  * 模板内的源码刻意不含反引号与 ${}（外层是模板字符串），换行用 \\n 转义，
@@ -16,10 +16,10 @@
 
 /** 供子代理逐字复制到 <plugin>/src/call-stats.ts 的模块源码。 */
 export const PLUGIN_CALL_STATS_SOURCE = `/**
- * 插件工具调用次数记录（plugin-forge 标准模块，勿改结构）。
+ * 插件工具调用次数记录（self-iteration-forge 标准模块，勿改结构）。
  *
- * 与 plugin-forge 共用同一个账本：$DSH_HOME/storages/plugin-call-stats.json
- * （缺省 ~/.dsh/storages/），plugin-forge 的 /forge status 与 /forge stats
+ * 与 self-iteration-forge 共用同一个账本：$DSH_HOME/storages/plugin-call-stats.json
+ * （缺省 ~/.dsh/storages/），self-iteration-forge 的 /self-iteration status 与 /self-iteration stats
  * 读它汇总所有插件的调用次数、成功率与最近调用时间。
  *
  * 设计约束（改动前先想清楚）：
@@ -31,10 +31,10 @@ import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import path from 'node:path'
 
-/** 账本文件名（与 plugin-forge 共享，勿改）。 */
+/** 账本文件名（与 self-iteration-forge 共享，勿改）。 */
 export const STATS_FILE_NAME = 'plugin-call-stats.json'
 
-/** 账本结构版本（与 plugin-forge 共享，勿改）。 */
+/** 账本结构版本（与 self-iteration-forge 共享，勿改）。 */
 export const STATS_VERSION = 1
 
 /** 账本中保留的最后错误信息长度。 */

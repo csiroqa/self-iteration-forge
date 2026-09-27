@@ -1,5 +1,5 @@
 /**
- * plugin-forge —— 冒烟测试（构建后运行，验证 lib 可加载且核心函数可用）。
+ * self-iteration-forge —— 冒烟测试（构建后运行，验证 lib 可加载且核心函数可用）。
  *
  * 不依赖 DSH 运行时，只验证：lib/index.js 可被 Node 直接加载、
  * 命名/slug/link 改写/.gitignore/git 提交链路在真实文件系统上工作。
@@ -35,10 +35,10 @@ function check(name, condition, detail = '') {
   }
 }
 
-const root = await mkdtemp(path.join(tmpdir(), 'plugin-forge-smoke-'))
+const root = await mkdtemp(path.join(tmpdir(), 'self-iteration-forge-smoke-'))
 const harness = path.join(root, 'deepseek-harness')
 try {
-  console.log('plugin-forge smoke: lib 加载成功')
+  console.log('self-iteration-forge smoke: lib 加载成功')
 
   check('normalizePluginName', normalizePluginName('My Cool Plugin!', 'x') === 'my-cool-plugin')
   check('slugFromRequirement', slugFromRequirement('Create a plugin for web search memo') === 'web-search-memo')

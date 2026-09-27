@@ -1,4 +1,4 @@
-# 代码审查报告：plugin-forge
+# 代码审查报告：self-iteration-forge
 
 - 审查日期：2026-08-15
 - 审查方式：多维度子代理并行审查

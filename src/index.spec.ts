@@ -1,5 +1,5 @@
 /**
- * plugin-forge —— 单元测试。
+ * self-iteration-forge —— 单元测试。
  *
  * 覆盖纯逻辑（命名、slug、link 改写、.gitignore、登记表读写）
  * 与 git 集成链路（init → add → diff → commit，真实 git，临时目录）。
@@ -27,7 +27,7 @@ let tempRoot: string
 let savedHome: string | undefined
 
 beforeEach(async () => {
-  tempRoot = await mkdtemp(path.join(tmpdir(), 'plugin-forge-spec-'))
+  tempRoot = await mkdtemp(path.join(tmpdir(), 'self-iteration-forge-spec-'))
   savedHome = process.env.DSH_HOME
   process.env.DSH_HOME = path.join(tempRoot, 'dsh-home')
 })

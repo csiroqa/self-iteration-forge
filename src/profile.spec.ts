@@ -13,7 +13,7 @@ let tempRoot: string
 let profilesDir: string
 
 beforeEach(async () => {
-  tempRoot = await mkdtemp(path.join(tmpdir(), 'plugin-forge-profile-'))
+  tempRoot = await mkdtemp(path.join(tmpdir(), 'self-iteration-forge-profile-'))
   profilesDir = path.join(tempRoot, 'profiles')
   await mkdir(profilesDir, { recursive: true })
 })

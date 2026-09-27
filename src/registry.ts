@@ -1,4 +1,4 @@
-/** 插件登记表（$DSH_HOME/plugin-forge.json），原子写入。 */
+/** 插件登记表（$DSH_HOME/self-iteration-forge.json），原子写入。 */
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { dshHome, samePath } from './utils.ts'
@@ -25,7 +25,10 @@ export interface ForgeRegistry {
   readonly repos: ForgeRepoEntry[]
 }
 
-const FILE_NAME = 'plugin-forge.json'
+const FILE_NAME = 'self-iteration-forge.json'
+
+/** 更名前（2026-09-27 前为 dsh-plugin-forge）的登记表文件名，仅用于一次性迁移。 */
+const LEGACY_FILE_NAME = 'plugin-forge.json'
 
 function isEntry(value: unknown): value is ForgeRepoEntry {
   if (typeof value !== 'object' || value === null) return false
@@ -38,21 +41,35 @@ function isEntry(value: unknown): value is ForgeRepoEntry {
     && (entry.summaryZh === undefined || typeof entry.summaryZh === 'string')
 }
 
-/** 读取登记表；文件不存在时返回空表。 */
+/** 解析登记表文本；结构非法时抛错（不静默丢数据）。 */
+function parseRegistry(text: string, fileName: string): ForgeRegistry {
+  const parsed: unknown = JSON.parse(text)
+  if (typeof parsed !== 'object' || parsed === null) throw new Error(`${fileName} 顶层必须是对象`)
+  const repos = (parsed as { repos?: unknown }).repos
+  if (!Array.isArray(repos)) throw new Error(`${fileName} 缺少 repos 数组`)
+  return { version: 1, repos: repos.filter(isEntry) }
+}
+
+/**
+ * 读取登记表；新文件不存在时自动迁移更名前的 plugin-forge.json（读旧写新，保留全部条目）。
+ * 两者都不存在时返回空表。
+ */
 export async function loadRegistry(): Promise<ForgeRegistry> {
   const file = path.join(dshHome(), FILE_NAME)
   let text: string
   try {
     text = await readFile(file, 'utf8')
   } catch (error) {
-    if (isNodeError(error) && error.code === 'ENOENT') return { version: 1, repos: [] }
-    throw error
+    if (!isNodeError(error) || error.code !== 'ENOENT') throw error
+    const legacy = path.join(dshHome(), LEGACY_FILE_NAME)
+    const legacyText = await readFile(legacy, 'utf8').catch(() => undefined)
+    if (legacyText === undefined) return { version: 1, repos: [] }
+    const migrated = parseRegistry(legacyText, LEGACY_FILE_NAME)
+    // 迁移失败不应挡住 forge 流程：登记表丢失只影响 /self-iteration status 的展示。
+    await saveRegistry(migrated).catch(() => undefined)
+    return migrated
   }
-  const parsed: unknown = JSON.parse(text)
-  if (typeof parsed !== 'object' || parsed === null) throw new Error('plugin-forge.json 顶层必须是对象')
-  const repos = (parsed as { repos?: unknown }).repos
-  if (!Array.isArray(repos)) throw new Error('plugin-forge.json 缺少 repos 数组')
-  return { version: 1, repos: repos.filter(isEntry) }
+  return parseRegistry(text, FILE_NAME)
 }
 
 /** 原子写入登记表。 */

@@ -1,5 +1,5 @@
 /**
- * DSH 插件生成工具（host 半区）：forge_plugin 工具 + /forge status + 自迭代引导。
+ * DSH 插件生成工具（host 半区）：forge_capability 工具 + /self-iteration status + 自迭代引导。
  * AI 原生：AI 自发判断缺口 → 子代理开发 → 独立仓库交付 → 自动热挂载。
  */
 import type { Context } from '@deepseek-ai/cordis'
@@ -12,7 +12,7 @@ import {
   type ForgeConfig,
 } from './forge.ts'
 
-export const name = 'plugin-forge'
+export const name = 'self-iteration-forge'
 
 /** 需要注入的服务：工具注册表、子代理运行时、命令注册表、系统提示词（自迭代引导）。 */
 export const inject = ['tools', 'subagents', 'commands', 'systemPrompt']
@@ -83,13 +83,13 @@ export function apply(ctx: Context, config: Partial<Config> = {}): void {
   const merged: Config = Config(config as Config)
   registerForgeTool(ctx, merged)
   registerForgeCommand(ctx)
-  // 自迭代引导：让 agent 在需要新能力时自发调用 forge_plugin。
+  // 自迭代引导：让 agent 在需要新能力时自发调用 forge_capability。
   ctx.systemPrompt.section({
-    name: 'self-iteration:forge_plugin',
+    name: 'self-iteration:forge_capability',
     order: SELF_ITERATION_SECTION_ORDER,
     text: () => selfIterationSectionText(),
   })
-  ctx.logger.info('plugin-forge 已加载：forge_plugin 工具与 /forge status 命令可用（targetRoot=%s）', merged.targetRoot)
+  ctx.logger.info('self-iteration-forge 已加载：forge_capability 工具与 /self-iteration status 命令可用（targetRoot=%s）', merged.targetRoot)
 }
 
 // ---- 公共导出 ----

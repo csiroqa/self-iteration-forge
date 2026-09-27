@@ -1,12 +1,14 @@
-# dsh-plugin-forge
+# self-iteration-forge
 
-[![CI](https://github.com/csiroqa/dsh-plugin-forge/actions/workflows/ci.yml/badge.svg)](https://github.com/csiroqa/dsh-plugin-forge/actions/workflows/ci.yml)
+[![CI](https://github.com/csiroqa/self-iteration-forge/actions/workflows/ci.yml/badge.svg)](https://github.com/csiroqa/self-iteration-forge/actions/workflows/ci.yml)
 
-An AI-native DSH plugin generator. The AI calls `forge_plugin` while executing tasks: a subagent builds the plugin → it is migrated to an independent git repo under `project-root/dsh-plugins/<name>` (English Conventional Commit on feature completion) → hot-mounted into the current session.
+The **self-iteration forge** for DSH agents: while executing a task the AI spots a capability gap and calls `forge_capability` to have a subagent forge the missing capability into a plugin — migrated to an independent git repo under `project-root/dsh-plugins/<name>` (English Conventional Commit on feature completion) → auto-installed into the current profile → hot-mounted into the current session. Every forged plugin reports its tool call counts into one ledger, aggregated by `/self-iteration stats`.
+
+> Rename note: named `dsh-plugin-forge` until 2026-09-27; renamed because community projects already use that name (e.g. `MYCF711/dsh-plugin-forge`). The old GitHub URL redirects.
 
 中文: [README.md](README.md)
 
-## Tool `forge_plugin`
+## Tool `forge_capability`
 
 | Param | Type | Default | Description |
 | --- | --- | --- | --- |
@@ -31,24 +33,24 @@ Output JSON:
 
 Failure (subagent not completed / post-migration build failed / load smoke failed) throws; staging is kept.
 
-## Commands `/forge status` and `/forge stats`
+## Commands `/self-iteration status` and `/self-iteration stats`
 
-`/forge status` (same as bare `/forge`) prints per repo; the trailing segment is that plugin's tool call summary:
+`/self-iteration status` (same as bare `/self-iteration`) prints per repo; the trailing segment is that plugin's tool call summary:
 
 ```
 - <name>（<path>）
   HEAD：<short-hash> <subject>；worktree：clean|dirty|missing；last commit：<local time>，count <n>；calls <c>（ok <ok> / failed <failed>，<t> tools），last <local time>
 ```
 
-With no records the segment reads "尚无调用记录"; an empty registry prints "plugin-forge 尚未创建任何插件仓库。"
+With no records the segment reads "尚无调用记录"; an empty registry prints "self-iteration-forge 尚未创建任何插件仓库。"
 
-`/forge stats [plugin]` prints the per-tool table (plugin / tool / calls / ok / failed / last call, sorted by call count); `/forge stats reset [plugin]` clears the ledger (all of it when the plugin name is omitted).
+`/self-iteration stats [plugin]` prints the per-tool table (plugin / tool / calls / ok / failed / last call, sorted by call count); `/self-iteration stats reset [plugin]` clears the ledger (all of it when the plugin name is omitted).
 
 ## Tool call ledger
 
 - File: `$DSH_HOME/storages/plugin-call-stats.json` (default `~/.dsh/storages/`), shape `{version: 1, plugins: {<plugin>: {tools: {<tool>: {calls, ok, failed, lastCalledAt, lastOkAt?, lastFailedAt?, lastError?}}, firstSeenAt, updatedAt}}}`
 - **New plugins get it automatically**: the subagent prompt mandates a `src/call-stats.ts` inlining the standard module shipped by `plugin-call-stats.template.ts`, and every tool `execute` is wrapped with `withCallStats('<plugin>', '<tool>', execute)`. Plugin repos are independent, so the module is inlined rather than shared; `src/call-stats.spec.ts` guards the two sides against drift
-- plugin-forge's own `forge_plugin` records through the same interface (plugin name `plugin-forge`)
+- self-iteration-forge's own `forge_capability` records through the same interface (plugin name `self-iteration-forge`)
 - Side-channel guarantees: only plugin/tool names, outcome and timestamps are stored (never arguments or results), deltas are merged and written atomically (tmp → rename), and every failure is swallowed so a tool never breaks on accounting
 - Command-driven plugins (no `defineTool`, the user entry point is a `/xxx` command): call `recordCall('<plugin>', '<command>', ok ? 'ok' : 'failed', reason)` in the command handler. Background triggers (session hooks and the like) are not counted by default — otherwise the count would grow with every session and stop meaning "how often it was used"
 
@@ -61,7 +63,7 @@ staging → subagent develops (typecheck/test/build) → duplicate check → mig
 - Migration: `deepseek-harness` paths in link deps and CI rewritten to target depth, registry-versioned `@deepseek-ai/*` deps rejected, `.gitignore` written (excludes node_modules/.git/.pnpm-store/lib/dist)
 - Update mode additionally runs `syncRemoveStale`: deletes source files in the target no longer present in staging
 - Commit: `<type>: <name>[: <summaryEn>]`, header ≤ 72 chars, summary clipped to budget; invalid type falls back to `feat`
-- Registration: `$DSH_HOME/plugin-forge.json`, shape `{version: 1, repos: [{name, path, createdAt, lastCommitAt?, commitCount, summaryZh?}]}`, atomic tmp+rename write
+- Registration: `$DSH_HOME/self-iteration-forge.json`, shape `{version: 1, repos: [{name, path, createdAt, lastCommitAt?, commitCount, summaryZh?}]}`, atomic tmp+rename write
 - Push only when explicitly configured (off by default, per AGENTS.md)
 
 ## Avoiding duplicates
@@ -95,7 +97,7 @@ typecheck/test/build in staging → `pnpm install && pnpm build` in the target a
 
 ```sh
 pnpm install && pnpm build
-dsh plugin --profile web add link:D:\2-OGP\dsh-plugin-forge
+dsh plugin --profile web add link:D:\2-OGP\self-iteration-forge
 ```
 
 Restart `dsh web`. Prerequisites: Node ≥ 22, pnpm, a local `deepseek-harness` checkout (deps are `link:`ed to `../deepseek-harness`).

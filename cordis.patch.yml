@@ -1,4 +1,4 @@
-# @dsh-external/plugin-forge bundle patch（host 半区：forge_plugin 工具 + /forge status|stats + 工具调用次数账本）。
+# @dsh-external/self-iteration-forge bundle patch（host 半区：forge_capability 工具 + /self-iteration status|stats + 工具调用次数账本）。
 # 安装：dsh plugin --profile web add link:<this-directory>
 #
 # config 全部可选（默认值见 src/index.ts 的 DEFAULTS）：
@@ -7,13 +7,13 @@
 #   harnessRoot      deepseek-harness 检出根；留空 = 自动查找
 #   subagentProvider 子代理 provider（默认 spawn）
 #   installProfile   装入的 profile 名；留空 = 自动探测当前 profile（bundle 含 @deepseek-ai/dsh-web-app 者）
-#   autoInstall      成功后自动装入当前 profile（默认 true；forge_plugin 的 install:false 可关闭单次）
+#   autoInstall      成功后自动装入当前 profile（默认 true；forge_capability 的 install:false 可关闭单次）
 #   maxChildDepth    子代理委托深度上限（默认 2）
 #   childTimeoutMs   子代理/构建超时（默认 45 分钟）
 #   commitType / push / gitAuthorName / gitAuthorEmail / keepStaging / stagingTtlDays / referenceRepos
 - insert:
-    - id: plugin-forge
-      name: '@dsh-external/plugin-forge'
+    - id: self-iteration-forge
+      name: '@dsh-external/self-iteration-forge'
       config:
         targetRoot: ''
         stagingRoot: ''

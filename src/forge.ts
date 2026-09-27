@@ -1,5 +1,5 @@
 /**
- * forge_plugin 工具与 /forge status 命令。
+ * forge_capability 工具与 /self-iteration status 命令。
  * 流程：staging → 子代理开发 → 迁移（link/CI 改写、依赖守卫、加载冒烟）→ 提交 → 登记 → 热挂载。
  * 编排抽成 runForge()，子代理经 startChild 注入以便测试。
  */
@@ -44,7 +44,7 @@ import {
 export interface ForgeConfig {
   /**
    * 独立仓库所在根目录；留空（默认）= 调用方工作区/dsh-plugins。
-   * forge_plugin 的 targetRoot 参数可临时覆盖。
+   * forge_capability 的 targetRoot 参数可临时覆盖。
    */
   readonly targetRoot: string
   /** staging 根目录；留空 = 调用方工作区/.forge-staging。 */
@@ -102,16 +102,16 @@ const MS_PER_DAY = 86_400_000
 /** 自迭代引导节（systemPrompt section，随每次提示词组装渲染）。 */
 export function selfIterationSectionText(): string {
   return [
-    '你是 DSH 的自迭代智能体：能力不足时用 `forge_plugin` 生成插件补齐。',
-    '执行任务时若缺少所需工具、只能手工重复处理、或发现可跨会话复用的功能，应调用 `forge_plugin` 生成插件。',
+    '你是 DSH 的自迭代智能体：能力不足时用 `forge_capability` 生成插件补齐。',
+    '执行任务时若缺少所需工具、只能手工重复处理、或发现可跨会话复用的功能，应调用 `forge_capability` 生成插件。',
     '生成后自动热挂载。重复需求使用 update=true 迭代，子代理自动检测重复。',
   ].join('\n')
 }
 
-const TOOL_NAME = 'forge_plugin'
+const TOOL_NAME = 'forge_capability'
 
-/** plugin-forge 自身在调用账本里的插件名（与仓库目录名一致）。 */
-const FORGE_PLUGIN_NAME = 'plugin-forge'
+/** self-iteration-forge 自身在调用账本里的插件名（与仓库目录名一致）。 */
+const FORGE_PLUGIN_NAME = 'self-iteration-forge'
 
 /** 进程内同名任务互斥：同一插件名同时只允许一个 forge 流程（防 staging/目标冲突）。 */
 const activeForge = new Set<string>()
@@ -139,7 +139,7 @@ export interface ChildReport {
   duplicateNote?: string
 }
 
-/** forge_plugin 的调用参数（经 schema 校验后）。 */
+/** forge_capability 的调用参数（经 schema 校验后）。 */
 export interface ForgeArgs {
   readonly requirement: string
   readonly name?: string
@@ -496,7 +496,7 @@ async function runForgeLocked(options: RunForgeOptions, name: string): Promise<F
     throw new Error(`目标目录已存在：${toPosix(target)}。请换一个 name，或设置 update=true 明确更新。`)
   }
   const mode: 'create' | 'update' = update && targetExists ? 'update' : 'create'
-  logger?.info('forge_plugin: 开始%s插件 %s（staging=%s）', mode === 'update' ? '更新' : '生成', name, toPosix(staging))
+  logger?.info('forge_capability: 开始%s插件 %s（staging=%s）', mode === 'update' ? '更新' : '生成', name, toPosix(staging))
 
   // 2. 准备 staging（清理重建；update 模式预填充现有源码，子代理只需增量修改）。
   await prepareStaging(staging, target, mode)
@@ -518,9 +518,9 @@ async function runForgeLocked(options: RunForgeOptions, name: string): Promise<F
     signal,
     maxDepth: config.maxChildDepth,
   })
-  logger?.info('forge_plugin: 子代理完成 %s（%s）', name, child.stopReason)
+  logger?.info('forge_capability: 子代理完成 %s（%s）', name, child.stopReason)
   if (child.stopReason !== 'completed') {
-    logger?.warn('forge_plugin: 子代理未正常完成 %s（%s）', name, child.stopReason)
+    logger?.warn('forge_capability: 子代理未正常完成 %s（%s）', name, child.stopReason)
     throw new Error(
       `子代理未正常完成（${child.stopReason}）。staging 保留在 ${toPosix(staging)}。`
       + (child.text.trim() === '' ? '' : `\n部分输出：\n${truncateTail(child.text.trim(), CHILD_TEXT_TAIL)}`),
@@ -530,7 +530,7 @@ async function runForgeLocked(options: RunForgeOptions, name: string): Promise<F
 
   // 3.5 重复检测：子代理发现需求与已有插件重复时，拒绝新建。
   if (report?.duplicateOf !== undefined && report.duplicateOf.trim() !== '') {
-    logger?.info('forge_plugin: 检测到与已有插件重复 %s → %s，未新建', name, report.duplicateOf.trim())
+    logger?.info('forge_capability: 检测到与已有插件重复 %s → %s，未新建', name, report.duplicateOf.trim())
     return withoutUndefined({
       ok: true,
       pluginName: name,
@@ -660,7 +660,7 @@ export async function migrateAndCommit(options: MigrateOptions): Promise<Migrate
   await ensureGitignore(migratedTo)
   const build = await verifyBuildInTarget(migratedTo, config, signal)
   if (!build.ok) {
-    logger?.warn('forge_plugin: 迁移后构建验证失败 %s：%s', name, build.detail ?? '')
+    logger?.warn('forge_capability: 迁移后构建验证失败 %s：%s', name, build.detail ?? '')
     throw new Error(
       `迁移后构建验证失败：${build.detail ?? '未知原因'}\nstaging 保留在 ${toPosix(staging)}，目标目录为 ${toPosix(migratedTo)}。`
       + ' 请检查 link 路径改写或依赖；修复后可对目标目录重试 pnpm install && pnpm build，'
@@ -671,7 +671,7 @@ export async function migrateAndCommit(options: MigrateOptions): Promise<Migrate
   // 会让 DSH 重启时整个插件树崩溃（真实事故：session-notes）。此处拦截。
   const load = await verifyPluginLoad(migratedTo)
   if (!load.ok) {
-    logger?.warn('forge_plugin: 加载冒烟未通过 %s：%s', name, load.detail ?? '')
+    logger?.warn('forge_capability: 加载冒烟未通过 %s：%s', name, load.detail ?? '')
     throw new Error(
       `加载冒烟未通过，已阻止交付：${load.detail ?? ''}`
       + `\n请修复 apply 期错误后重试（staging 保留在 ${toPosix(staging)}，目标目录为 ${toPosix(migratedTo)}，重试带 update=true）。`,
@@ -689,7 +689,7 @@ export async function migrateAndCommit(options: MigrateOptions): Promise<Migrate
       email: config.gitAuthorEmail,
     })
     committed = true
-    logger?.info('forge_plugin: 已提交 %s：%s', toPosix(migratedTo), commitSubject)
+    logger?.info('forge_capability: 已提交 %s：%s', toPosix(migratedTo), commitSubject)
   }
   const migratedPath = toPosix(migratedTo)
   const previous = (await loadRegistry()).repos.find((repo) => samePath(repo.path, migratedPath))
@@ -717,7 +717,7 @@ export async function migrateAndCommit(options: MigrateOptions): Promise<Migrate
       : await detectActiveProfile(path.join(dshHome(), 'profiles'))
     if (profile === undefined) {
       installDetail = '未探测到当前 profile（bundles 不含 @deepseek-ai/dsh-web-app）。可配置 installProfile 显式指定。'
-      logger?.warn('forge_plugin: 未探测到当前 profile，跳过装入 %s', name)
+      logger?.warn('forge_capability: 未探测到当前 profile，跳过装入 %s', name)
     } else {
       const install = await runCommand(
         'dsh',
@@ -726,10 +726,10 @@ export async function migrateAndCommit(options: MigrateOptions): Promise<Migrate
       )
       if (install.code !== 0) {
         installDetail = truncateTail(install.stderr.trim(), TEXT_TAIL)
-        logger?.warn('forge_plugin: 装入 profile 失败 %s：%s', name, install.stderr.trim())
+        logger?.warn('forge_capability: 装入 profile 失败 %s：%s', name, install.stderr.trim())
       } else {
         installed = true
-        logger?.info('forge_plugin: 已装入 profile %s：%s', profile, migratedPath)
+        logger?.info('forge_capability: 已装入 profile %s：%s', profile, migratedPath)
       }
     }
   }
@@ -741,7 +741,7 @@ export function shouldInstall(args: ForgeArgs, config: ForgeConfig): boolean {
   return args.install === true || (args.install === undefined && config.autoInstall)
 }
 
-/** 注册 forge_plugin 工具；返回撤销函数。 */
+/** 注册 forge_capability 工具；返回撤销函数。 */
 /** 工具输出 JSON-schema 的 properties（M03：单一维护源；satisfies 约束与 ForgeToolResult 字段对齐）。 */
 const RESULT_SCHEMA_PROPERTIES = {
   ok: { type: 'boolean', required: true },
@@ -764,7 +764,7 @@ const RESULT_SCHEMA_PROPERTIES = {
 export function registerForgeTool(ctx: Context, config: ForgeConfig): () => void {
   return ctx.tools.register(defineTool({
     name: TOOL_NAME,
-    description: '按需生成 DSH 插件：子代理开发构建，迁移为「项目根/dsh-plugins/<name>」独立 git 仓库，功能完成即提交（英文 Conventional Commit），自动热挂载（本会话立即可用，agent 不能自发重启），缺省自动装入当前 profile（重启后生效；install:false 关闭），登记（/forge status 可查）。每个插件的工具调用次数汇入统一账本（/forge stats 可查）。子代理自动检测重复，已存在则返回 existingName，改用 update=true 迭代。耗时数分钟、需网络。',
+    description: '按需生成 DSH 插件：子代理开发构建，迁移为「项目根/dsh-plugins/<name>」独立 git 仓库，功能完成即提交（英文 Conventional Commit），自动热挂载（本会话立即可用，agent 不能自发重启），缺省自动装入当前 profile（重启后生效；install:false 关闭），登记（/self-iteration status 可查）。每个插件的工具调用次数汇入统一账本（/self-iteration stats 可查）。子代理自动检测重复，已存在则返回 existingName，改用 update=true 迭代。耗时数分钟、需网络。',
     parameters: {
       requirement: {
         type: 'string',
@@ -808,7 +808,7 @@ export function registerForgeTool(ctx: Context, config: ForgeConfig): () => void
     isConcurrencySafe: () => false,
     timeoutMs: config.childTimeoutMs,
     async execute(args, exec) {
-      // 自身也记账：/forge stats 能看到 forge_plugin 被调用了多少次。
+      // 自身也记账：/self-iteration stats 能看到 forge_capability 被调用了多少次。
       // 记账是旁路：finally 里吞掉异常，绝不影响 forge 流程。
       let callOk = false
       let callDetail: string | undefined
@@ -855,11 +855,11 @@ export function registerForgeTool(ctx: Context, config: ForgeConfig): () => void
         if (args.hot !== false && result.ok && result.migratedTo !== undefined) {
           const mount = await mountPlugin(ctx, result.migratedTo)
           if (mount.ok) {
-            ctx.logger.info('forge_plugin: 已热挂载 %s 到当前运行时', result.migratedTo)
+            ctx.logger.info('forge_capability: 已热挂载 %s 到当前运行时', result.migratedTo)
             callOk = true
             return withoutUndefined({ ...result, hotMounted: true })
           }
-          ctx.logger.warn('forge_plugin: 热挂载失败 %s：%s', result.migratedTo, mount.detail ?? '')
+          ctx.logger.warn('forge_capability: 热挂载失败 %s：%s', result.migratedTo, mount.detail ?? '')
           callDetail = mount.detail
           return withoutUndefined({ ...result, hotMounted: false, hotDetail: mount.detail })
         }
@@ -875,12 +875,12 @@ export function registerForgeTool(ctx: Context, config: ForgeConfig): () => void
   }))
 }
 
-/** /forge 的子命令：status（默认）/ stats [插件名] / stats reset [插件名]。 */
+/** /self-iteration 的子命令：status（默认）/ stats [插件名] / stats reset [插件名]。 */
 export type ForgeSubcommand =
   | { readonly kind: 'status' }
   | { readonly kind: 'stats'; readonly plugin?: string; readonly reset: boolean }
 
-/** 解析 /forge 后的输入；空输入与无法识别的输入都按 status 处理（保持旧的裸 /forge 行为）。 */
+/** 解析 /self-iteration 后的输入；空输入与无法识别的输入都按 status 处理（保持旧的裸 /self-iteration 行为）。 */
 export function parseForgeSubcommand(rawInput: string): ForgeSubcommand {
   const tokens = rawInput.trim().split(/\s+/u).filter((token) => token !== '')
   if (tokens.length === 0 || tokens[0] === 'status') return { kind: 'status' }
@@ -895,11 +895,11 @@ export function parseForgeSubcommand(rawInput: string): ForgeSubcommand {
     : { kind: 'stats', plugin: tokens[1], reset: false }
 }
 
-/** /forge status：仓库清单 + 每个插件的工具调用摘要。 */
+/** /self-iteration status：仓库清单 + 每个插件的工具调用摘要。 */
 async function forgeStatusText(): Promise<string> {
   const registry = await loadRegistry()
   if (registry.repos.length === 0) {
-    return 'plugin-forge 尚未创建任何插件仓库。'
+    return 'self-iteration-forge 尚未创建任何插件仓库。'
   }
   const stats = await loadCallStats()
   const lines: string[] = []
@@ -922,10 +922,10 @@ async function forgeStatusText(): Promise<string> {
       + formatPluginCallSummary(stats, repo.name),
     )
   }
-  return `plugin-forge 已创建的插件仓库（${registry.repos.length} 个）：\n${lines.join('\n')}`
+  return `self-iteration-forge 已创建的插件仓库（${registry.repos.length} 个）：\n${lines.join('\n')}`
 }
 
-/** /forge stats [插件名]：按插件/工具列调用次数；stats reset 清零账本。 */
+/** /self-iteration stats [插件名]：按插件/工具列调用次数；stats reset 清零账本。 */
 async function forgeStatsText(sub: Extract<ForgeSubcommand, { kind: 'stats' }>): Promise<string> {
   if (sub.reset) {
     const removed = await clearCallStats(sub.plugin)
@@ -950,11 +950,11 @@ async function forgeStatsText(sub: Extract<ForgeSubcommand, { kind: 'stats' }>):
   ].join('\n')
 }
 
-/** 注册 /forge 命令（status / stats 子命令）；返回撤销函数。 */
+/** 注册 /self-iteration 命令（status / stats 子命令）；返回撤销函数。 */
 export function registerForgeCommand(ctx: Context): () => void {
   return ctx.commands.register({
-    name: 'forge',
-    description: '查看 plugin-forge 已创建的插件仓库（路径 / HEAD / 工作区状态 / 最近提交 / 工具调用次数）；/forge stats 看调用明细',
+    name: 'self-iteration',
+    description: '查看 self-iteration-forge 已创建的插件仓库（路径 / HEAD / 工作区状态 / 最近提交 / 工具调用次数）；/self-iteration stats 看调用明细',
     input: { hint: 'status | stats [插件名] | stats reset [插件名]' },
     handler: async (invocation) => {
       const sub = parseForgeSubcommand(invocation.rawInput)

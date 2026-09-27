@@ -1,5 +1,5 @@
 /**
- * plugin-forge —— 热挂载测试（真实 @deepseek-ai/cordis Context）。
+ * self-iteration-forge —— 热挂载测试（真实 @deepseek-ai/cordis Context）。
  *
  * 验证 mountPlugin：
  *  - 缺服务时拒绝并给出重启方案；
@@ -16,7 +16,7 @@ import { mountPlugin } from './hotmount.ts'
 let tempRoot: string
 
 beforeEach(async () => {
-  tempRoot = await mkdtemp(path.join(tmpdir(), 'plugin-forge-hotmount-'))
+  tempRoot = await mkdtemp(path.join(tmpdir(), 'self-iteration-forge-hotmount-'))
 })
 
 afterEach(async () => {

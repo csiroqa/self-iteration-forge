@@ -5,7 +5,7 @@
  * 不报错（dsh-tools 只拦截同 scope 重名），但模型侧按 agent 视角解析时
  * 会发生遮蔽（机制确认：dsh-tools ToolLayer 的 per-agent 提示分支）。
  *
- * 来源：当前 DSH base bundle + plugin-forge 注册的工具名（agent 可见
+ * 来源：当前 DSH base bundle + self-iteration-forge 注册的工具名（agent 可见
  * 工具列表）。随 DSH 版本更新需同步：新增内置工具时在此追加。
  * 注意：只列宿主真实工具，不含 forge 产物（如验证用的 probe-echo）。
  */
@@ -14,7 +14,7 @@ export const BUILTIN_TOOL_NAMES: ReadonlySet<string> = new Set([
   'create_goal',
   'edit',
   'exit_plan_mode',
-  'forge_plugin',
+  'forge_capability',
   'get_goal',
   'glob',
   'grep',

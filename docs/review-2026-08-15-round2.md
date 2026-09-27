@@ -1,8 +1,8 @@
-# plugin-forge 第二轮多维度代码审查 — 2026-08-15
+# self-iteration-forge 第二轮多维度代码审查 — 2026-08-15
 
 四维并行子代理审查（Bug / Perf / Maintenance / DeadCode）+ 主代理交叉复核勘误。第一轮审查与修复之后（`9c50e31`、`07dc333`）的二次体检。
 
-- 审查对象：`@dsh-external/plugin-forge`（工作区 `D:\2-OGP\plugin-forge`）
+- 审查对象：`@dsh-external/self-iteration-forge`（工作区 `D:\2-OGP\self-iteration-forge`）
 - 范围：`src/*.ts` + `.spec.ts` + `scripts/` + `docs/`
 - 方法：4 个独立子代理并行出报告 → 主代理逐条对照源码复核、去重、勘误 → 汇总可执行修复项
 - 状态：下述"采纳"项已在本轮修复提交中落地（见末尾），"评估后跳过"项说明理由。

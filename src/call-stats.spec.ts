@@ -149,7 +149,7 @@ describe('/forge 子命令解析', () => {
     expect(parseForgeSubcommand('status')).toEqual({ kind: 'status' })
   })
 
-  it('未知子命令按 status 处理（保持裸 /forge 的旧行为）', () => {
+  it('未知子命令按 status 处理（保持裸 /self-iteration 的旧行为）', () => {
     expect(parseForgeSubcommand('wat')).toEqual({ kind: 'status' })
   })
 

@@ -1,7 +1,7 @@
 {
-  "name": "@dsh-external/plugin-forge",
+  "name": "@dsh-external/self-iteration-forge",
   "version": "0.1.0",
-  "description": "AI-native DSH 插件生成工具：forge_plugin 工具让 AI 自发发现能力缺口、子代理开发、迁移为独立 git 仓库并自动提交与热挂载",
+  "description": "DSH 智能体自迭代锻造台：forge_capability 工具让 AI 自发发现能力缺口、子代理把缺失能力锻造成插件、迁移为独立 git 仓库并自动提交、装入 profile 与热挂载",
   "private": true,
   "type": "module",
   "main": "lib/index.js",
@@ -30,6 +30,7 @@
     "deepseek-harness",
     "cordis",
     "forge",
+    "capability-forging",
     "plugin-generator",
     "subagent",
     "self-iteration",

@@ -1,5 +1,5 @@
 /**
- * plugin-forge —— 端到端集成测试。
+ * self-iteration-forge —— 端到端集成测试。
  *
  * 注入假子代理（直接往 staging 写一个最小可构建插件），完整跑通
  * runForge 流水线：staging → 迁移 → link 改写 → 依赖守卫 → 目标目录
@@ -175,7 +175,7 @@ function makeConfig(): ForgeConfig {
 }
 
 beforeEach(async () => {
-  tempRoot = await mkdtemp(path.join(tmpdir(), 'plugin-forge-e2e-'))
+  tempRoot = await mkdtemp(path.join(tmpdir(), 'self-iteration-forge-e2e-'))
   savedHome = process.env.DSH_HOME
   process.env.DSH_HOME = path.join(tempRoot, 'dsh-home')
   harnessRoot = await findHarnessRoot(REPO_ROOT)
