@@ -1,5 +1,5 @@
 /**
- * forge_capability 工具与 /self-iteration status 命令。
+ * extend_self 工具与 /self-iteration status 命令。
  * 流程：staging → 子代理开发 → 迁移（link/CI 改写、依赖守卫、加载冒烟）→ 提交 → 登记 → 热挂载。
  * 编排抽成 runForge()，子代理经 startChild 注入以便测试。
  */
@@ -45,7 +45,7 @@ import {
 export interface ForgeConfig {
   /**
    * 独立仓库所在根目录；留空（默认）= 调用方工作区/dsh-plugins。
-   * forge_capability 的 targetRoot 参数可临时覆盖。
+   * extend_self 的 targetRoot 参数可临时覆盖。
    */
   readonly targetRoot: string
   /** staging 根目录；留空 = 调用方工作区/.forge-staging。 */
@@ -103,13 +103,24 @@ const MS_PER_DAY = 86_400_000
 /** 自迭代引导节（systemPrompt section，随每次提示词组装渲染）。 */
 export function selfIterationSectionText(): string {
   return [
-    '你是 DSH 的自迭代智能体：能力不足时用 `forge_capability` 生成插件补齐。',
-    '执行任务时若缺少所需工具、只能手工重复处理、或发现可跨会话复用的功能，应调用 `forge_capability` 生成插件。',
+    '你是 DSH 的自迭代智能体：能力不足时用 `extend_self` 生成插件补齐。',
+    '执行任务时若缺少所需工具、只能手工重复处理、或发现可跨会话复用的功能，应调用 `extend_self` 生成插件。',
+    '（`add_capability` 是同一工具的过渡期别名，优先用 `extend_self`。）',
     '生成后自动热挂载。重复需求使用 update=true 迭代，子代理自动检测重复。',
   ].join('\n')
 }
 
-const TOOL_NAME = 'forge_capability'
+const TOOL_NAME = 'extend_self'
+
+/**
+ * 过渡期别名：与主名同一实现。改名的目的是模型侧语义更准（自迭代），
+ * 但跨改名时刻的会话可能仍按旧名调用，故保留别名一段时间。
+ * 账本按实际调用名分记，/self-iteration stats 看不到别名的使用量即可撤掉。
+ */
+const TOOL_ALIAS_NAMES: readonly string[] = ['add_capability']
+
+/** 实际注册的工具名：主名在前，别名在后。 */
+const TOOL_NAMES: readonly string[] = [TOOL_NAME, ...TOOL_ALIAS_NAMES]
 
 /** self-iteration-forge 自身在调用账本里的插件名（与仓库目录名一致）。 */
 const FORGE_PLUGIN_NAME = 'self-iteration-forge'
@@ -140,7 +151,7 @@ export interface ChildReport {
   duplicateNote?: string
 }
 
-/** forge_capability 的调用参数（经 schema 校验后）。 */
+/** extend_self 的调用参数（经 schema 校验后）。 */
 export interface ForgeArgs {
   readonly requirement: string
   readonly name?: string
@@ -497,7 +508,7 @@ async function runForgeLocked(options: RunForgeOptions, name: string): Promise<F
     throw new Error(`目标目录已存在：${toPosix(target)}。请换一个 name，或设置 update=true 明确更新。`)
   }
   const mode: 'create' | 'update' = update && targetExists ? 'update' : 'create'
-  logger?.info('forge_capability: 开始%s插件 %s（staging=%s）', mode === 'update' ? '更新' : '生成', name, toPosix(staging))
+  logger?.info('extend_self: 开始%s插件 %s（staging=%s）', mode === 'update' ? '更新' : '生成', name, toPosix(staging))
 
   // 2. 准备 staging（清理重建；update 模式预填充现有源码，子代理只需增量修改）。
   await prepareStaging(staging, target, mode)
@@ -519,9 +530,9 @@ async function runForgeLocked(options: RunForgeOptions, name: string): Promise<F
     signal,
     maxDepth: config.maxChildDepth,
   })
-  logger?.info('forge_capability: 子代理完成 %s（%s）', name, child.stopReason)
+  logger?.info('extend_self: 子代理完成 %s（%s）', name, child.stopReason)
   if (child.stopReason !== 'completed') {
-    logger?.warn('forge_capability: 子代理未正常完成 %s（%s）', name, child.stopReason)
+    logger?.warn('extend_self: 子代理未正常完成 %s（%s）', name, child.stopReason)
     throw new Error(
       `子代理未正常完成（${child.stopReason}）。staging 保留在 ${toPosix(staging)}。`
       + (child.text.trim() === '' ? '' : `\n部分输出：\n${truncateTail(child.text.trim(), CHILD_TEXT_TAIL)}`),
@@ -531,7 +542,7 @@ async function runForgeLocked(options: RunForgeOptions, name: string): Promise<F
 
   // 3.5 重复检测：子代理发现需求与已有插件重复时，拒绝新建。
   if (report?.duplicateOf !== undefined && report.duplicateOf.trim() !== '') {
-    logger?.info('forge_capability: 检测到与已有插件重复 %s → %s，未新建', name, report.duplicateOf.trim())
+    logger?.info('extend_self: 检测到与已有插件重复 %s → %s，未新建', name, report.duplicateOf.trim())
     return withoutUndefined({
       ok: true,
       pluginName: name,
@@ -661,7 +672,7 @@ export async function migrateAndCommit(options: MigrateOptions): Promise<Migrate
   await ensureGitignore(migratedTo)
   const build = await verifyBuildInTarget(migratedTo, config, signal)
   if (!build.ok) {
-    logger?.warn('forge_capability: 迁移后构建验证失败 %s：%s', name, build.detail ?? '')
+    logger?.warn('extend_self: 迁移后构建验证失败 %s：%s', name, build.detail ?? '')
     throw new Error(
       `迁移后构建验证失败：${build.detail ?? '未知原因'}\nstaging 保留在 ${toPosix(staging)}，目标目录为 ${toPosix(migratedTo)}。`
       + ' 请检查 link 路径改写或依赖；修复后可对目标目录重试 pnpm install && pnpm build，'
@@ -672,7 +683,7 @@ export async function migrateAndCommit(options: MigrateOptions): Promise<Migrate
   // 会让 DSH 重启时整个插件树崩溃（真实事故：session-notes）。此处拦截。
   const load = await verifyPluginLoad(migratedTo)
   if (!load.ok) {
-    logger?.warn('forge_capability: 加载冒烟未通过 %s：%s', name, load.detail ?? '')
+    logger?.warn('extend_self: 加载冒烟未通过 %s：%s', name, load.detail ?? '')
     throw new Error(
       `加载冒烟未通过，已阻止交付：${load.detail ?? ''}`
       + `\n请修复 apply 期错误后重试（staging 保留在 ${toPosix(staging)}，目标目录为 ${toPosix(migratedTo)}，重试带 update=true）。`,
@@ -690,7 +701,7 @@ export async function migrateAndCommit(options: MigrateOptions): Promise<Migrate
       email: config.gitAuthorEmail,
     })
     committed = true
-    logger?.info('forge_capability: 已提交 %s：%s', toPosix(migratedTo), commitSubject)
+    logger?.info('extend_self: 已提交 %s：%s', toPosix(migratedTo), commitSubject)
   }
   const migratedPath = toPosix(migratedTo)
   const previous = (await loadRegistry()).repos.find((repo) => samePath(repo.path, migratedPath))
@@ -718,7 +729,7 @@ export async function migrateAndCommit(options: MigrateOptions): Promise<Migrate
       : await detectActiveProfile(path.join(dshHome(), 'profiles'))
     if (profile === undefined) {
       installDetail = '未探测到当前 profile（bundles 不含 @deepseek-ai/dsh-web-app）。可配置 installProfile 显式指定。'
-      logger?.warn('forge_capability: 未探测到当前 profile，跳过装入 %s', name)
+      logger?.warn('extend_self: 未探测到当前 profile，跳过装入 %s', name)
     } else {
       const install = await runCommand(
         'dsh',
@@ -727,10 +738,10 @@ export async function migrateAndCommit(options: MigrateOptions): Promise<Migrate
       )
       if (install.code !== 0) {
         installDetail = truncateTail(install.stderr.trim(), TEXT_TAIL)
-        logger?.warn('forge_capability: 装入 profile 失败 %s：%s', name, install.stderr.trim())
+        logger?.warn('extend_self: 装入 profile 失败 %s：%s', name, install.stderr.trim())
       } else {
         installed = true
-        logger?.info('forge_capability: 已装入 profile %s：%s', profile, migratedPath)
+        logger?.info('extend_self: 已装入 profile %s：%s', profile, migratedPath)
       }
     }
   }
@@ -742,7 +753,6 @@ export function shouldInstall(args: ForgeArgs, config: ForgeConfig): boolean {
   return args.install === true || (args.install === undefined && config.autoInstall)
 }
 
-/** 注册 forge_capability 工具；返回撤销函数。 */
 /** 工具输出 JSON-schema 的 properties（M03：单一维护源；satisfies 约束与 ForgeToolResult 字段对齐）。 */
 const RESULT_SCHEMA_PROPERTIES = {
   ok: { type: 'boolean', required: true },
@@ -762,10 +772,24 @@ const RESULT_SCHEMA_PROPERTIES = {
   existingName: { type: 'string' },
 } as const satisfies Record<Exclude<keyof ForgeToolResult, 'ok' | 'pluginName' | 'committed' | 'build' | 'files'> | 'ok' | 'pluginName' | 'committed' | 'build' | 'files', unknown>
 
+/**
+ * 注册自迭代工具：主名 {@link TOOL_NAME} + 过渡期别名 {@link TOOL_ALIAS_NAMES}；
+ * 同一份实现注册多次，别名只多一个名字，不多一份行为。
+ * 返回撤销函数（按注册的逆序逐个撤销）。
+ */
 export function registerForgeTool(ctx: Context, config: ForgeConfig): () => void {
-  return ctx.tools.register(defineTool({
-    name: TOOL_NAME,
-    description: '按需生成 DSH 插件：子代理开发构建，迁移为「项目根/dsh-plugins/<name>」独立 git 仓库，功能完成即提交（英文 Conventional Commit），自动热挂载（本会话立即可用，agent 不能自发重启），缺省自动装入当前 profile（重启后生效；install:false 关闭），登记（/self-iteration status 可查）。每个插件的工具调用次数汇入统一账本（/self-iteration stats 可查）。子代理自动检测重复，已存在则返回 existingName，改用 update=true 迭代。耗时数分钟、需网络。',
+  const disposers = TOOL_NAMES.map((toolName) => ctx.tools.register(buildForgeTool(ctx, config, toolName)))
+  return () => {
+    for (const dispose of disposers.reverse()) dispose()
+    disposers.length = 0
+  }
+}
+
+/** 构造某个工具名下的完整定义（主名与别名共用，故按名参数化）。 */
+function buildForgeTool(ctx: Context, config: ForgeConfig, toolName: string) {
+  return defineTool({
+    name: toolName,
+    description: `${toolName === TOOL_NAME ? '' : `别名：等同 ${TOOL_NAME}（主名），仅为过渡期保留，优先使用 ${TOOL_NAME}。`}按需生成 DSH 插件：子代理开发构建，迁移为「项目根/dsh-plugins/<name>」独立 git 仓库，功能完成即提交（英文 Conventional Commit），自动热挂载（本会话立即可用，agent 不能自发重启），缺省自动装入当前 profile（重启后生效；install:false 关闭），登记（/self-iteration status 可查）。每个插件的工具调用次数汇入统一账本（/self-iteration stats 可查）。子代理自动检测重复，已存在则返回 existingName，改用 update=true 迭代。耗时数分钟、需网络。`,
     parameters: {
       requirement: {
         type: 'string',
@@ -809,7 +833,7 @@ export function registerForgeTool(ctx: Context, config: ForgeConfig): () => void
     isConcurrencySafe: () => false,
     timeoutMs: config.childTimeoutMs,
     async execute(args, exec) {
-      // 自身也记账：/self-iteration stats 能看到 forge_capability 被调用了多少次。
+      // 自身也记账：/self-iteration stats 能看到 extend_self（及别名）被调用了多少次。
       // 记账是旁路：finally 里吞掉异常，绝不影响 forge 流程。
       let callOk = false
       let callDetail: string | undefined
@@ -856,11 +880,11 @@ export function registerForgeTool(ctx: Context, config: ForgeConfig): () => void
         if (args.hot !== false && result.ok && result.migratedTo !== undefined) {
           const mount = await mountPlugin(ctx, result.migratedTo)
           if (mount.ok) {
-            ctx.logger.info('forge_capability: 已热挂载 %s 到当前运行时', result.migratedTo)
+            ctx.logger.info('extend_self: 已热挂载 %s 到当前运行时', result.migratedTo)
             callOk = true
             return withoutUndefined({ ...result, hotMounted: true })
           }
-          ctx.logger.warn('forge_capability: 热挂载失败 %s：%s', result.migratedTo, mount.detail ?? '')
+          ctx.logger.warn('extend_self: 热挂载失败 %s：%s', result.migratedTo, mount.detail ?? '')
           callDetail = mount.detail
           return withoutUndefined({ ...result, hotMounted: false, hotDetail: mount.detail })
         }
@@ -870,10 +894,12 @@ export function registerForgeTool(ctx: Context, config: ForgeConfig): () => void
         callDetail = error instanceof Error ? error.message : String(error)
         throw error
       } finally {
-        recordToolCall(FORGE_PLUGIN_NAME, TOOL_NAME, callOk ? 'ok' : 'failed', callDetail)
+        // 按「实际被调用的名字」记账：别名是否还在被用，一看 stats 就知道，
+        // 过渡期结束后据此决定是否撤掉别名。
+        recordToolCall(FORGE_PLUGIN_NAME, toolName, callOk ? 'ok' : 'failed', callDetail)
       }
     },
-  }))
+  })
 }
 
 /** /self-iteration 的子命令：status（默认）/ stats [插件名] / stats reset [插件名]。 */

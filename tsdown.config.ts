@@ -2,7 +2,7 @@
  * self-iteration-forge — DSH 插件生成工具。
  *
  * 纯 host 半区插件（无浏览器 UI）：构建产出
- *  - lib/index.js   host 半区（Node ESM：forge_capability 工具 + /self-iteration status 命令）
+ *  - lib/index.js   host 半区（Node ESM：extend_self 工具 + /self-iteration status 命令）
  *
  * 依赖约定（与姐妹仓库一致）：所有 @deepseek-ai/* 运行时依赖由插件安装后
  * 自带的 node_modules 提供（link: 指向本机 deepseek-harness 检出的构建产物），

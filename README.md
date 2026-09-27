@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/csiroqa/self-iteration-forge/actions/workflows/ci.yml/badge.svg)](https://github.com/csiroqa/self-iteration-forge/actions/workflows/ci.yml)
 
-DSH 的**智能体自迭代锻造台**：AI 在执行任务时发现能力缺口，调用 `forge_capability` 让子代理把缺失的能力**锻造**成插件 —— 迁移为「项目根/dsh-plugins/<name>」独立 git 仓库（功能完成即英文 Conventional Commit）→ 自动装入当前 profile → 热挂载当前会话。每个锻造出的插件，其工具调用次数汇入统一账本，由 `/self-iteration stats` 汇总。
+DSH 的**智能体自迭代锻造台**：AI 在执行任务时发现能力缺口，调用 `extend_self` 让子代理把缺失的能力**锻造**成插件 —— 迁移为「项目根/dsh-plugins/<name>」独立 git 仓库（功能完成即英文 Conventional Commit）→ 自动装入当前 profile → 热挂载当前会话。每个锻造出的插件，其工具调用次数汇入统一账本，由 `/self-iteration stats` 汇总。
 
 借由一切皆插件理念的智能体自迭代探索，现已实现自举（？
 
@@ -10,7 +10,9 @@ DSH 的**智能体自迭代锻造台**：AI 在执行任务时发现能力缺口
 
 English: [README.en.md](README.en.md)
 
-## 工具 `forge_capability`
+## 工具 `extend_self`
+
+> 别名：同一实现的过渡期别名 `add_capability` 也可调用，优先用主名 `extend_self`。账本按**实际调用的名字**分记，`/self-iteration stats` 里看不到别名的用量就说明可以撤掉了。
 
 | 参数 | 类型 | 默认 | 说明 |
 | --- | --- | --- | --- |
@@ -52,7 +54,7 @@ English: [README.en.md](README.en.md)
 
 - 账本文件：`$DSH_HOME/storages/plugin-call-stats.json`（缺省 `~/.dsh/storages/`），形状 `{version: 1, plugins: {<插件名>: {tools: {<工具名>: {calls, ok, failed, lastCalledAt, lastOkAt?, lastFailedAt?, lastError?}}, firstSeenAt, updatedAt}}}`
 - **新插件自动带统计**：子代理提示词强制要求新建 `src/call-stats.ts` 并内联 `plugin-call-stats.template.ts` 下发的标准模块，每个工具的 execute 用 `withCallStats('<插件名>', '<工具名>', execute)` 包裹；各插件是独立仓库，故内联同一份源码而非交叉依赖，`src/call-stats.spec.ts` 校验两侧不漂移
-- self-iteration-forge 自身的 `forge_capability` 也走同一套接口记账（插件名 `self-iteration-forge`）
+- self-iteration-forge 自身的 `extend_self`（及别名）也走同一套接口记账（插件名 `self-iteration-forge`）
 - 旁路保证：只记插件名 / 工具名 / 成败与时间（不记参数与返回值），增量合并 + 原子写（tmp → rename），任何失败都被吞掉，绝不影响工具执行
 - 命令型插件（无 defineTool、用户入口是 `/xxx` 命令）：在命令 handler 里显式 `recordCall('<插件名>', '<命令名>', ok ? 'ok' : 'failed', 原因)`；后台自动触发（会话钩子等）默认不记，否则次数会随会话数无条件增长
 

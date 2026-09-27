@@ -6,7 +6,7 @@
  * 下发的标准模块，把自己的工具调用汇入同一个账本；本模块负责读取、汇总与渲染：
  *   - /self-iteration status：每个仓库一行追加「调用 N 次（成功 x / 失败 y），最近 …」
  *   - /self-iteration stats：按插件/工具出明细表（可按插件名过滤、可清零）
- *   - forge_capability 自身也用同一套接口记账（插件名 self-iteration-forge）
+ *   - extend_self 自身也用同一套接口记账（插件名 self-iteration-forge；别名 add_capability 按实际调用名分记）
  *
  * 旁路原则：统计失败绝不影响 forge 流程——读账本失败按空账本处理，写失败只吞异常。
  */

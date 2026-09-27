@@ -2,13 +2,15 @@
 
 [![CI](https://github.com/csiroqa/self-iteration-forge/actions/workflows/ci.yml/badge.svg)](https://github.com/csiroqa/self-iteration-forge/actions/workflows/ci.yml)
 
-The **self-iteration forge** for DSH agents: while executing a task the AI spots a capability gap and calls `forge_capability` to have a subagent forge the missing capability into a plugin — migrated to an independent git repo under `project-root/dsh-plugins/<name>` (English Conventional Commit on feature completion) → auto-installed into the current profile → hot-mounted into the current session. Every forged plugin reports its tool call counts into one ledger, aggregated by `/self-iteration stats`.
+The **self-iteration forge** for DSH agents: while executing a task the AI spots a capability gap and calls `extend_self` to have a subagent forge the missing capability into a plugin — migrated to an independent git repo under `project-root/dsh-plugins/<name>` (English Conventional Commit on feature completion) → auto-installed into the current profile → hot-mounted into the current session. Every forged plugin reports its tool call counts into one ledger, aggregated by `/self-iteration stats`.
 
 > Rename note: named `dsh-plugin-forge` until 2026-09-27; renamed because community projects already use that name (e.g. `MYCF711/dsh-plugin-forge`). The old GitHub URL redirects.
 
 中文: [README.md](README.md)
 
-## Tool `forge_capability`
+## Tool `extend_self`
+
+> Alias: `add_capability` is a transition alias of the same implementation; prefer the primary name `extend_self`. The ledger records whichever name was actually called, so when `/self-iteration stats` shows no alias usage it is safe to drop.
 
 | Param | Type | Default | Description |
 | --- | --- | --- | --- |
@@ -50,7 +52,7 @@ With no records the segment reads "尚无调用记录"; an empty registry prints
 
 - File: `$DSH_HOME/storages/plugin-call-stats.json` (default `~/.dsh/storages/`), shape `{version: 1, plugins: {<plugin>: {tools: {<tool>: {calls, ok, failed, lastCalledAt, lastOkAt?, lastFailedAt?, lastError?}}, firstSeenAt, updatedAt}}}`
 - **New plugins get it automatically**: the subagent prompt mandates a `src/call-stats.ts` inlining the standard module shipped by `plugin-call-stats.template.ts`, and every tool `execute` is wrapped with `withCallStats('<plugin>', '<tool>', execute)`. Plugin repos are independent, so the module is inlined rather than shared; `src/call-stats.spec.ts` guards the two sides against drift
-- self-iteration-forge's own `forge_capability` records through the same interface (plugin name `self-iteration-forge`)
+- self-iteration-forge's own `extend_self` (and its alias) records through the same interface (plugin name `self-iteration-forge`)
 - Side-channel guarantees: only plugin/tool names, outcome and timestamps are stored (never arguments or results), deltas are merged and written atomically (tmp → rename), and every failure is swallowed so a tool never breaks on accounting
 - Command-driven plugins (no `defineTool`, the user entry point is a `/xxx` command): call `recordCall('<plugin>', '<command>', ok ? 'ok' : 'failed', reason)` in the command handler. Background triggers (session hooks and the like) are not counted by default — otherwise the count would grow with every session and stop meaning "how often it was used"
 

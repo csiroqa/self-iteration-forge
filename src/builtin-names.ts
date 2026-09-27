@@ -10,11 +10,12 @@
  * 注意：只列宿主真实工具，不含 forge 产物（如验证用的 probe-echo）。
  */
 export const BUILTIN_TOOL_NAMES: ReadonlySet<string> = new Set([
+  'add_capability',
   'ask_user_question',
   'create_goal',
   'edit',
   'exit_plan_mode',
-  'forge_capability',
+  'extend_self',
   'get_goal',
   'glob',
   'grep',
